@@ -5,6 +5,7 @@ import com.idtrust.wallet.oid4vp.WalletPresentation;
 import jakarta.validation.constraints.NotBlank;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public final class WalletDtos {
@@ -21,7 +22,13 @@ public final class WalletDtos {
     public record RecategorizeRequest(String category) {
     }
 
-    public record PresentRequest(@NotBlank String audience, @NotBlank String nonce) {
+    /**
+     * {@code disclosedClaims} is only meaningful for an SD-JWT VC credential (FR-WAL-014 -
+     * Selective Disclosure): {@code null}/empty discloses every claim (the only option for a
+     * plain W3C JWT-VC, which has no disclosures to withhold), a non-empty list reveals only the
+     * named claims. See {@code WalletService#presentCredential}.
+     */
+    public record PresentRequest(@NotBlank String audience, @NotBlank String nonce, List<String> disclosedClaims) {
     }
 
     public record Response(

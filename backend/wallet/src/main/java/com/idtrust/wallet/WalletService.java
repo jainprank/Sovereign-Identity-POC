@@ -7,6 +7,8 @@ import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
 import com.idtrust.credential.issuance.Credential;
 import com.idtrust.credential.issuance.CredentialIssuanceService;
+import com.idtrust.credential.issuance.sdjwt.SdJwtPresentationBuilder;
+import com.idtrust.credential.schema.CredentialFormat;
 import com.idtrust.did.Did;
 import com.idtrust.did.DidService;
 import com.idtrust.did.provider.DidMethod;
@@ -45,9 +47,13 @@ import java.util.UUID;
  * <p>FR-WAL-011/012/017 (Select Credentials for Presentation, Generate Presentation, Presentation
  * History) are implemented by {@link #presentCredential} now that E10 exists: it signs a VP JWT
  * via {@link WalletPresentationSigner} using the same KMS-backed key {@link #create} already
- * provisioned, and records a {@link WalletPresentation} history row. FR-WAL-013 through 016
- * (multi-credential/derived-claim presentations, presentation preview, revocation-aware
- * presentation) remain out of scope - this pass only ever presents one whole credential per
+ * provisioned, and records a {@link WalletPresentation} history row. FR-WAL-014 (Selective
+ * Disclosure, E11) is layered on top for an SD-JWT VC credential: {@code disclosedClaims} is
+ * passed to {@code credential.issuance.sdjwt.SdJwtPresentationBuilder}, which drops every
+ * disclosure the holder didn't choose to reveal before the artifact is wrapped in the VP JWT - a
+ * plain W3C JWT-VC credential has no disclosures to withhold, so the parameter is ignored for that
+ * format. FR-WAL-016 (multi-credential presentations, presentation preview, revocation-aware
+ * presentation) remains out of scope - this pass only ever presents one whole credential per
  * request. Deliberately, {@code wallet} does not gain a Gradle dependency on {@code verification}
  * here (see this module's README section) - the caller is expected to independently submit the
  * returned VP JWT to the verifier's own {@code POST /api/v1/verification-requests/{id}/present}.
@@ -165,7 +171,7 @@ public class WalletService {
 
     @Transactional
     public WalletPresentation presentCredential(UUID tenantId, UUID walletId, UUID walletCredentialId,
-                                                 String audience, String nonce) {
+                                                 String audience, String nonce, List<String> disclosedClaims) {
         Wallet wallet = get(tenantId, walletId);
         WalletCredential wc = walletCredentialRepository.findByTenantIdAndWalletIdAndId(tenantId, walletId, walletCredentialId)
                 .orElseThrow(() -> new ApiException(ApiErrorCode.RESOURCE_NOT_FOUND,
@@ -174,8 +180,12 @@ public class WalletService {
         Did holderDid = didService.get(tenantId, wallet.getDidId());
         ManagedKey signingKey = keyService.getActiveKeyForDid(holderDid.getId());
 
+        String credentialArtifact = credential.getFormat() == CredentialFormat.SD_JWT_VC
+                ? SdJwtPresentationBuilder.filterDisclosures(credential.getCredentialJwt(), disclosedClaims)
+                : credential.getCredentialJwt();
+
         WalletPresentationSigner.SignedPresentation signed = WalletPresentationSigner.sign(
-                tenantId, holderDid, audience, nonce, List.of(credential.getCredentialJwt()),
+                tenantId, holderDid, audience, nonce, List.of(credentialArtifact),
                 Instant.now().plus(PRESENTATION_TTL), signingKey, keyService);
 
         WalletPresentation presentation = new WalletPresentation(tenantId, wallet.getId(), wc.getId(), audience, nonce,

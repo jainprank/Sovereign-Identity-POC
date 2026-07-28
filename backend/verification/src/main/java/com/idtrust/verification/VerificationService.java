@@ -9,6 +9,7 @@ import com.idtrust.credential.issuance.Credential;
 import com.idtrust.credential.issuance.CredentialIssuanceService;
 import com.idtrust.credential.issuance.CredentialStatus;
 import com.idtrust.credential.issuance.JwtVerifiableCredentialVerifier;
+import com.idtrust.credential.issuance.sdjwt.SdJwtVerifier;
 import com.idtrust.did.DidService;
 import com.idtrust.verification.oid4vp.Oid4vpRequestGenerator;
 import com.idtrust.verification.policy.PolicyDefinition;
@@ -49,6 +50,18 @@ import java.util.UUID;
  *       platform's wallet ({@code WalletPresentationSigner}) only ever submits one credential per
  *       presentation in this pass; multi-credential presentations are a natural but unbuilt
  *       extension.</li>
+ *   <li>EPIC 5/8's SD-JWT VC support (E11: {@code CredentialFormat.SD_JWT_VC}, FR-WAL-014) is
+ *       handled transparently by {@link #decodeCredentialArtifact}, which distinguishes a
+ *       combined-format SD-JWT string from a plain W3C JWT-VC by the presence of {@code "~"} (never
+ *       legal inside a compact 3-part JWT). Disclosure integrity is a genuine check, not a
+ *       superficial one: {@link SdJwtVerifier#verifyDisclosures} recomputes each disclosure's
+ *       SHA-256 digest and confirms it was actually present in the issuer-signed {@code _sd} claim
+ *       before exposing the claim value, recorded as {@code disclosureIntegrityValid} in the result
+ *       and folded into the overall pass/fail. No Key Binding JWT (KB-JWT) is required or parsed -
+ *       this platform's outer VP JWT ({@code WalletPresentationSigner}) already carries a
+ *       holder-signed {@code iss}/{@code aud}/{@code nonce}, which proves possession of the same
+ *       holder key an inner KB-JWT would otherwise prove redundantly. A documented simplification,
+ *       not a missing security control.</li>
  * </ul>
  */
 @Service
@@ -165,28 +178,29 @@ public class VerificationService {
         }
         checks.put("credentialPresent", true);
 
-        JwtVerifiableCredentialVerifier.DecodedJwt vc;
+        CredentialView vc;
         try {
-            vc = JwtVerifiableCredentialVerifier.decode(credentials.get(0));
+            vc = decodeCredentialArtifact(credentials.get(0));
         } catch (IllegalArgumentException e) {
-            return Result.failure("Malformed verifiable credential JWT");
+            return Result.failure("Malformed verifiable credential");
         }
 
-        String issuerDid = (String) vc.payload().get("iss");
-        String subjectDid = (String) vc.payload().get("sub");
+        String issuerDid = vc.issuerDid();
+        String subjectDid = vc.subjectDid();
         boolean subjectBindingValid = holderDid != null && holderDid.equals(subjectDid);
         checks.put("subjectBindingValid", subjectBindingValid);
 
         boolean credentialSignatureValid;
         try {
             Map<String, Object> issuerDocument = didService.resolve(issuerDid);
-            credentialSignatureValid = JwtVerifiableCredentialVerifier.verify(vc, issuerDocument);
+            credentialSignatureValid = JwtVerifiableCredentialVerifier.verify(vc.signedJwt(), issuerDocument);
         } catch (Exception e) {
             credentialSignatureValid = false;
         }
         checks.put("credentialSignatureValid", credentialSignatureValid);
+        checks.put("disclosureIntegrityValid", vc.disclosureIntegrityValid());
 
-        Object expClaim = vc.payload().get("exp");
+        Object expClaim = vc.expClaim();
         boolean notExpired = expClaim == null
                 || Instant.now().getEpochSecond() < ((Number) expClaim).longValue();
         checks.put("notExpired", notExpired);
@@ -196,13 +210,13 @@ public class VerificationService {
                 || trustedIssuerDids.contains(issuerDid);
         checks.put("trustedIssuer", trustedIssuer);
 
-        Map<String, Object> credentialSubject = extractCredentialSubject(vc.payload());
+        Map<String, Object> credentialSubject = vc.credentialSubject();
         List<String> requiredClaims = rules.requiredClaims();
         boolean requiredClaimsPresent = requiredClaims == null || requiredClaims.isEmpty()
                 || requiredClaims.stream().allMatch(credentialSubject::containsKey);
         checks.put("requiredClaimsPresent", requiredClaimsPresent);
 
-        UUID credentialId = parseCredentialId((String) vc.payload().get("jti"));
+        UUID credentialId = parseCredentialId(vc.jti());
         String statusCheck = "UNKNOWN";
         boolean statusOk = true;
         if (credentialId != null) {
@@ -219,13 +233,47 @@ public class VerificationService {
         checks.put("statusCheck", statusCheck);
 
         boolean passed = nonceValid && audienceValid && holderSignatureValid && subjectBindingValid
-                && credentialSignatureValid && (!rules.requireNotExpired() || notExpired)
+                && credentialSignatureValid && vc.disclosureIntegrityValid() && (!rules.requireNotExpired() || notExpired)
                 && trustedIssuer && requiredClaimsPresent && statusOk;
 
         if (!passed) {
             return Result.failure(firstFailureReason(checks));
         }
         return Result.success(credentialId, subjectDid);
+    }
+
+    /**
+     * Decodes either a plain JWT-VC or an SD-JWT VC "combined format" string (detected by the
+     * presence of {@code ~}, which never appears in a compact JWT) into a common view, so
+     * {@link #evaluate} doesn't need to know which format it's checking. For SD-JWT, {@code
+     * credentialSubject} is the disclosed-claims map recomputed by {@link
+     * SdJwtVerifier#verifyDisclosures} (FR-VER-007's "Check Digest/Disclosure" per the Baseline's
+     * section 15) rather than an inline {@code vc.credentialSubject} - a disclosure whose digest
+     * doesn't match the issuer's {@code _sd} claim fails {@code disclosureIntegrityValid} instead
+     * of throwing, so the rest of the checks still run and the failure is recorded like any other.
+     */
+    @SuppressWarnings("unchecked")
+    private CredentialView decodeCredentialArtifact(String artifact) {
+        if (artifact.contains("~")) {
+            SdJwtVerifier.ParsedSdJwt parsed = SdJwtVerifier.parse(artifact);
+            Map<String, Object> credentialSubject;
+            boolean disclosureIntegrityValid;
+            try {
+                credentialSubject = SdJwtVerifier.verifyDisclosures(parsed);
+                disclosureIntegrityValid = true;
+            } catch (IllegalArgumentException e) {
+                credentialSubject = Map.of();
+                disclosureIntegrityValid = false;
+            }
+            Map<String, Object> payload = parsed.issuerJwt().payload();
+            return new CredentialView(parsed.issuerJwt(), (String) payload.get("iss"), (String) payload.get("sub"),
+                    credentialSubject, payload.get("exp"), (String) payload.get("jti"), disclosureIntegrityValid);
+        }
+
+        JwtVerifiableCredentialVerifier.DecodedJwt vc = JwtVerifiableCredentialVerifier.decode(artifact);
+        Map<String, Object> credentialSubject = extractCredentialSubject(vc.payload());
+        return new CredentialView(vc, (String) vc.payload().get("iss"), (String) vc.payload().get("sub"),
+                credentialSubject, vc.payload().get("exp"), (String) vc.payload().get("jti"), true);
     }
 
     @SuppressWarnings("unchecked")
@@ -235,6 +283,12 @@ public class VerificationService {
             return (Map<String, Object>) subject;
         }
         return Map.of();
+    }
+
+    /** A format-agnostic view over either a plain JWT-VC or a parsed SD-JWT VC's issuer JWT. */
+    private record CredentialView(JwtVerifiableCredentialVerifier.DecodedJwt signedJwt, String issuerDid,
+                                   String subjectDid, Map<String, Object> credentialSubject, Object expClaim,
+                                   String jti, boolean disclosureIntegrityValid) {
     }
 
     private UUID parseCredentialId(String jti) {

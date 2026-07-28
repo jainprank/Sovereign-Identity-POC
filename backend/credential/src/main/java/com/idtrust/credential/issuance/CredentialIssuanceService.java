@@ -5,6 +5,8 @@ import com.idtrust.common.audit.AuditEventPublisher;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import com.idtrust.credential.issuance.sdjwt.SdJwtVcSigner;
+import com.idtrust.credential.schema.CredentialFormat;
 import com.idtrust.credential.schema.CredentialSchema;
 import com.idtrust.credential.schema.CredentialSchemaService;
 import com.idtrust.credential.schema.SchemaStatus;
@@ -74,11 +76,22 @@ public class CredentialIssuanceService {
         ManagedKey signingKey = keyService.getActiveKeyForDid(issuer.getId());
 
         UUID credentialId = UUID.randomUUID();
-        JwtVerifiableCredentialSigner.SignedCredential signed = JwtVerifiableCredentialSigner.sign(
-                tenantId, credentialId, issuer, subjectDid, schema.getName(), claims, expiresAt, signingKey, keyService);
+        String credentialJwt;
+        String credentialHash;
+        if (schema.getFormat() == CredentialFormat.SD_JWT_VC) {
+            SdJwtVcSigner.SignedSdJwt signed = SdJwtVcSigner.sign(
+                    tenantId, credentialId, issuer, subjectDid, schema.getName(), claims, expiresAt, signingKey, keyService);
+            credentialJwt = signed.combined();
+            credentialHash = signed.credentialHash();
+        } else {
+            JwtVerifiableCredentialSigner.SignedCredential signed = JwtVerifiableCredentialSigner.sign(
+                    tenantId, credentialId, issuer, subjectDid, schema.getName(), claims, expiresAt, signingKey, keyService);
+            credentialJwt = signed.jwt();
+            credentialHash = signed.credentialHash();
+        }
 
         Credential credential = new Credential(credentialId, tenantId, schemaId, issuerDid, subjectDid,
-                schema.getFormat(), signed.jwt(), signed.credentialHash(), claims, expiresAt);
+                schema.getFormat(), credentialJwt, credentialHash, claims, expiresAt);
         credentialRepository.save(credential);
         audit(tenantId, "CREDENTIAL_ISSUED", credential.getId());
 

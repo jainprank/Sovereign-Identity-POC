@@ -97,7 +97,8 @@ public class WalletController {
     public ResponseEntity<WalletDtos.PresentationResponse> present(@PathVariable UUID id, @PathVariable UUID credentialId,
                                                                      @Valid @RequestBody WalletDtos.PresentRequest request) {
         var presentation = walletService.presentCredential(
-                TenantContext.requireTenantId(), id, credentialId, request.audience(), request.nonce());
+                TenantContext.requireTenantId(), id, credentialId, request.audience(), request.nonce(),
+                request.disclosedClaims());
         return ResponseEntity.status(HttpStatus.CREATED).body(WalletDtos.PresentationResponse.from(presentation));
     }
 

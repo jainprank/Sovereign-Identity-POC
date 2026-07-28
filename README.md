@@ -55,7 +55,7 @@ Build order agreed 2026-07-28:
 | E08 | Status / Revocation | ⚠️ implemented, unverified (no local build yet) |
 | E09 | OID4VCI / Wallets | ⚠️ implemented, unverified (no local build yet) |
 | E10 | OID4VP / Verification | ⚠️ implemented, unverified (no local build yet) |
-| E11 | SD-JWT | pending |
+| E11 | SD-JWT | ⚠️ implemented, unverified (no local build yet) |
 | E12 | Trust Registry | pending |
 | E13 | Hedera | pending |
 | E14 | Enterprise Integrations | pending |
@@ -430,10 +430,68 @@ module in this same pass, in a new `com.idtrust.wallet.oid4vp` package.
 - Only one credential is checked per presentation (`vp.verifiableCredential[0]`) — multi-credential
   presentations are unbuilt.
 - FR-WAL-013 through 016 (multi-credential/derived-claim presentations) are not implemented.
-- Selective disclosure for SD-JWT VCs (FR-OID4VP claims tied to `CredentialFormat.SD_JWT_VC`) is
-  deferred to E11, matching that format's already-reserved-but-unimplemented status since E06.
+- Selective disclosure for SD-JWT VCs (`CredentialFormat.SD_JWT_VC`, reserved since E06) is
+  implemented in E11, below.
 - The OID4VP request URI's `response_uri` is a relative path (no base-URL config exists anywhere
   in this codebase) — same documented limitation as E09's credential offer URIs.
+
+## E11: SD-JWT
+
+Selective Disclosure JWT Verifiable Credentials (IETF SD-JWT VC) — the format reserved as
+`CredentialFormat.SD_JWT_VC` since E06 — are now fully implemented end-to-end: issuance
+(`credential`), selective disclosure at presentation time (`wallet`, FR-WAL-014), and
+disclosure-integrity checking (`verification`). There is no dedicated SD-JWT epic/FR-prefix in the
+Baseline's catalogue; this is a cross-cutting slice across EPIC 5/6 (format), EPIC 8 (FR-WAL-014),
+and EPIC 10 (section 15's Signature/Digest/Disclosure verification checks).
+
+- **Issuance** (new `credential.issuance.sdjwt.SdJwtVcSigner`): for a schema whose
+  `format == SD_JWT_VC`, `CredentialIssuanceService.issue` now builds one `[salt, claimName,
+  claimValue]` disclosure per claim instead of embedding claims directly in the JWT payload,
+  computes each disclosure's base64url-SHA-256 digest, sorts the digests lexicographically (so
+  array order can't leak claim-definition order), and signs a payload carrying only
+  `iss`/`sub`/`iat`/`exp`/`jti`/`vct`/`_sd_alg`/`_sd` — the same Ed25519-via-KMS signing path as
+  `JwtVerifiableCredentialSigner`. The persisted `Credential.credentialJwt` becomes the
+  **combined format** string: `<issuer JWT>~<disclosure1>~...~<disclosureN>~`. The subject DID
+  (`sub`) is deliberately left as a plain, always-visible top-level claim rather than a digest —
+  FR-VER-009 subject-binding and wallet credential lookups need it without first requiring a
+  disclosure to be opened.
+- **Selective disclosure at presentation time** (new `credential.issuance.sdjwt.
+  SdJwtPresentationBuilder`, FR-WAL-014): `WalletService.presentCredential` now takes a
+  `disclosedClaims` list (`WalletDtos.PresentRequest`); for an SD-JWT VC credential,
+  `SdJwtPresentationBuilder.filterDisclosures` keeps the issuer JWT segment untouched and drops
+  every disclosure whose claim name isn't in the holder-chosen list (`null`/empty means "disclose
+  everything") before the artifact is wrapped in the outer VP JWT — a plain W3C JWT-VC has no
+  disclosures to withhold, so the parameter is a no-op for that format.
+- **Verifier-side integrity checking** (new `credential.issuance.sdjwt.SdJwtVerifier`,
+  `VerificationService.decodeCredentialArtifact`): a `"~"` in the credential artifact string (never
+  legal inside a compact 3-part JWT) distinguishes a combined-format SD-JWT from a plain JWT-VC.
+  `SdJwtVerifier.verifyDisclosures` recomputes each remaining disclosure's digest and confirms it
+  was actually present in the issuer-signed `_sd` claim before exposing the claim value — a genuine
+  hash-comparison check, not a superficial one, mirroring `JwtVerifiableCredentialVerifier`'s real
+  Ed25519 signature verification from E10. The outcome is recorded as `disclosureIntegrityValid` in
+  the verification result's `checks` map and folded into the overall pass/fail. A new private
+  `VerificationService.CredentialView` record normalizes both credential formats into one shape so
+  the existing subject-binding/signature/expiry/trust/requiredClaims/status checks run unchanged
+  regardless of format.
+- **Deliberate scope decision — no Key Binding JWT (KB-JWT)**: the canonical SD-JWT VC presentation
+  format appends a holder-signed KB-JWT as a trailing combined-format segment, proving possession of
+  the credential's binding key. This platform skips it: `WalletPresentationSigner` already wraps
+  every presented artifact inside a holder-signed outer VP JWT (`iss`/`aud`/`nonce`) carrying the
+  same proof-of-possession, so an inner KB-JWT would be redundant. `SdJwtVerifier.parse` silently
+  ignores a trailing KB-JWT segment if present (for interop with other issuers) but never requires
+  or checks one.
+- **No new database migration**: `credentials.credential_jwt` and `wallet_presentations.
+  presentation_jwt` were already unbounded `TEXT` columns (`V8__credential_core.sql`,
+  `V14__verification_core.sql`), so the longer, multi-disclosure combined-format string fits with no
+  schema change — the first epic since E01 not to need one.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E10.
+- No Key Binding JWT support (see above) — a documented simplification, not a missing security
+  control, given the outer VP JWT's equivalent holder-binding proof.
+- `sub` is always a plain, visible top-level claim, never itself made selectively disclosable.
+- Only whole-claim disclosure is supported — no support for disclosing individual array elements or
+  nested structured claims (SD-JWT VC's recursive/array disclosure forms).
 
 ## Prerequisites
 
