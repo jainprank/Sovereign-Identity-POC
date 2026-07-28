@@ -53,7 +53,7 @@ Build order agreed 2026-07-28:
 | E06 | Schemas / Templates | ⚠️ implemented, unverified (no local build yet) |
 | E07 | Credential Issuance | ⚠️ implemented, unverified (no local build yet) |
 | E08 | Status / Revocation | ⚠️ implemented, unverified (no local build yet) |
-| E09 | OID4VCI / Wallets | pending |
+| E09 | OID4VCI / Wallets | ⚠️ implemented, unverified (no local build yet) |
 | E10 | OID4VP / Verification | pending |
 | E11 | SD-JWT | pending |
 | E12 | Trust Registry | pending |
@@ -280,6 +280,69 @@ The `credential` module now implements lifecycle management (EPIC 7, FR-CRED-*):
 - Expiration is lazy/on-read only; a credential past `expiresAt` that is never read (via `checkStatus`,
   `statusList`, or any other lookup that calls `effectiveStatus`) keeps its stale `ISSUED` status in
   the database until it is.
+
+## E09: Digital Wallet & OID4VCI
+
+The new `wallet` module implements EPIC 8 (Digital Wallet, FR-WAL-*) and EPIC 9 (OID4VCI,
+FR-OID4VCI-*), the pre-authorized-code grant flow through which a holder's wallet claims a
+credential this platform issued in E07:
+
+- **Wallet** (`Wallet`, FR-WAL-001): creating a wallet provisions a real `did:key` DID via the
+  existing `did` module (`DidService.create`) — that call already generates and stores a signing
+  key via `kms` as a side effect (E04/E05), so FR-WAL-002 (Wallet DID) and FR-WAL-003 (Wallet Key)
+  are both satisfied with no additional key-provisioning code. `ownerUserId` is a plain UUID column
+  with no JPA relationship into `identity`, mirroring the `keys.did_id` precedent from E04/E05 —
+  `wallet` depends on `did`/`credential` but must not gain a dependency on `identity`.
+- **Wallet credentials** (`WalletCredential`, FR-WAL-004/005/006/007/009): stores only a
+  `credentialId` reference into the `credential` module's `credentials` table, never a copy of
+  `credential_jwt` — the underlying `Credential` remains the single source of truth for the VC and
+  its status, so a wallet's view never drifts out of sync with a subsequent E08 revoke/suspend/
+  renew. Deleting a wallet's copy (FR-WAL-007) removes only this reference row, never the
+  underlying credential. `category` (FR-WAL-009) is free-text; no fixed taxonomy is specified
+  anywhere in the Baseline.
+- **OID4VCI session** (`Oid4vciSession`, `Oid4vciSessionService`, FR-OID4VCI-006/009/010/011/012/014):
+  a new, separate offer/claim mechanism, entirely distinct from E07's `CredentialOfferGenerator`/
+  `CredentialIssuanceService.issue()` placeholder offer (left untouched) — E07 already signs
+  credentials synchronously at issuance time, so this session exists purely to gate *handing the
+  already-signed JWT to a claiming wallet* behind a one-time pre-authorized code (10-minute TTL)
+  and a short-lived access token, not to trigger any new signing operation. Lifecycle:
+  `OFFERED` → `TOKEN_ISSUED` → `CLAIMED`, with `EXPIRED` reachable from either of the first two if
+  the TTL lapses.
+- **Authorization Code Flow deferred** (FR-OID4VCI-007/008): despite being labeled MVP in the
+  Baseline, this requires an interactive, browser-redirect-based user authorization step, and no
+  wallet UI exists yet to drive it (E15). The pre-authorized-code grant alone is a complete path for
+  this platform, since its own credential issuance (E07) is already issuer-initiated and
+  synchronous — a holder never needs to "authorize" access to claims they didn't choose.
+  FR-OID4VCI-015 (Wallet Notification) is also out of scope — no notification infrastructure
+  (EPIC 17) exists yet.
+- **Issuer metadata** (FR-OID4VCI-001/002, `issuerMetadata`): derived from the tenant's `PUBLISHED`
+  `CredentialSchema`s rather than a separate configuration resource, consistent with schemas
+  already being this platform's only notion of a "credential configuration".
+- **Unauthenticated protocol endpoints, still tenant-scoped**: `GET /issuer-metadata`,
+  `POST /token` and `POST /credential` are `permitAll` in `SecurityConfig` — a holder's wallet calls
+  them with no Keycloak session — but still get correct Row-Level Security scoping, because
+  `TenantContextInterceptor` populates `TenantContext` from the `X-Tenant-ID` header alone for
+  *every* dispatched request, regardless of authentication status. Callers of these three endpoints
+  must always send `X-Tenant-ID`.
+- **Presentation flows deferred to E10**: FR-WAL-010 through 017 (generating/submitting a
+  presentation) require a verifier's presentation request (OID4VP), which doesn't exist until E10.
+  FR-WAL-018 through 022 (backup/recovery, multi-device sync, lock/PIN, biometric, offline mode) are
+  V1/V2-priority and also out of scope.
+- **`WalletController`** exposes `POST/GET /api/v1/wallets`, `GET /{id}`, `GET/GET/PUT/DELETE
+  /{id}/credentials[/{credentialId}]`, `POST /{id}/claim` (`PLATFORM_ADMIN`/`ORG_ADMIN`/`HOLDER`).
+  **`Oid4vciController`** exposes `POST /api/v1/oid4vci/offers` (issuer-side, authenticated,
+  `PLATFORM_ADMIN`/`ORG_ADMIN`/`ISSUER`) plus the three `permitAll` protocol endpoints above.
+- **Schema**: `V12__wallet_core.sql` (`wallets`, `wallet_credentials`, `oid4vci_sessions` tables) +
+  `V13__wallet_row_level_security.sql` (RLS policy, mirroring the `V3`/`V5`/`V7`/`V9`/`V11` pattern).
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E08.
+- `GET /api/v1/wallets` returns every wallet in the tenant, not just the caller's own — no
+  per-holder "my resources" ownership filter exists anywhere else in this codebase yet either.
+- FR-OID4VCI-007/008 (Authorization Code Flow) and FR-OID4VCI-015 (Wallet Notification) are not
+  implemented — see above.
+- FR-WAL-010 through 022 (presentation flows, backup/recovery, multi-device sync, lock/PIN,
+  biometric, offline mode) are not implemented — deferred to E10 or later, see above.
 
 ## Prerequisites
 

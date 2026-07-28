@@ -3,4 +3,11 @@ dependencies {
     implementation project(':did')
     implementation project(':credential')
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    // Oid4vciOfferGenerator serializes the offer payload with Jackson's ObjectMapper, matching
+    // credential's CredentialOfferGenerator.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    // FR-OID4VCI-004 (QR Offer): reuses the same ZXing dependency introduced for FR-ISS-010 in E07.
+    implementation 'com.google.zxing:core:3.5.3'
+    implementation 'com.google.zxing:javase:3.5.3'
 }

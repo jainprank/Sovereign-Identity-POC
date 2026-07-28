@@ -37,6 +37,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/health", "/actuator/**").permitAll()
                         .requestMatchers("/api/v1/invitations/accept").permitAll()
                         .requestMatchers("/api/v1/dids/resolve").permitAll()
+                        .requestMatchers("/api/v1/oid4vci/issuer-metadata", "/api/v1/oid4vci/token",
+                                "/api/v1/oid4vci/credential").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
