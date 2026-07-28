@@ -10,10 +10,17 @@ import com.idtrust.credential.issuance.CredentialIssuanceService;
 import com.idtrust.did.Did;
 import com.idtrust.did.DidService;
 import com.idtrust.did.provider.DidMethod;
+import com.idtrust.kms.key.KeyService;
+import com.idtrust.kms.key.ManagedKey;
 import com.idtrust.wallet.oid4vci.Oid4vciSessionService;
+import com.idtrust.wallet.oid4vp.WalletPresentation;
+import com.idtrust.wallet.oid4vp.WalletPresentationRepository;
+import com.idtrust.wallet.oid4vp.WalletPresentationSigner;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -35,8 +42,15 @@ import java.util.UUID;
  * decision and must not affect the issuer's authoritative record (which remains subject to E08's
  * revoke/suspend/renew lifecycle regardless of which wallets still reference it).
  *
- * <p>FR-WAL-010 through 017 (presentation generation/submission) are out of scope for this pass:
- * they require a verifier's presentation request (OID4VP), which doesn't exist until E10.
+ * <p>FR-WAL-011/012/017 (Select Credentials for Presentation, Generate Presentation, Presentation
+ * History) are implemented by {@link #presentCredential} now that E10 exists: it signs a VP JWT
+ * via {@link WalletPresentationSigner} using the same KMS-backed key {@link #create} already
+ * provisioned, and records a {@link WalletPresentation} history row. FR-WAL-013 through 016
+ * (multi-credential/derived-claim presentations, presentation preview, revocation-aware
+ * presentation) remain out of scope - this pass only ever presents one whole credential per
+ * request. Deliberately, {@code wallet} does not gain a Gradle dependency on {@code verification}
+ * here (see this module's README section) - the caller is expected to independently submit the
+ * returned VP JWT to the verifier's own {@code POST /api/v1/verification-requests/{id}/present}.
  * FR-WAL-018 through 022 (backup/recovery, multi-device sync, lock/PIN, biometric, offline mode)
  * are V1/V2-priority and also out of scope.
  *
@@ -47,21 +61,29 @@ import java.util.UUID;
 @Service
 public class WalletService {
 
+    private static final Duration PRESENTATION_TTL = Duration.ofMinutes(5);
+
     private final WalletRepository walletRepository;
     private final WalletCredentialRepository walletCredentialRepository;
+    private final WalletPresentationRepository walletPresentationRepository;
     private final DidService didService;
     private final CredentialIssuanceService credentialIssuanceService;
     private final Oid4vciSessionService oid4vciSessionService;
+    private final KeyService keyService;
     private final AuditEventPublisher auditEventPublisher;
 
     public WalletService(WalletRepository walletRepository, WalletCredentialRepository walletCredentialRepository,
-                          DidService didService, CredentialIssuanceService credentialIssuanceService,
-                          Oid4vciSessionService oid4vciSessionService, AuditEventPublisher auditEventPublisher) {
+                          WalletPresentationRepository walletPresentationRepository, DidService didService,
+                          CredentialIssuanceService credentialIssuanceService,
+                          Oid4vciSessionService oid4vciSessionService, KeyService keyService,
+                          AuditEventPublisher auditEventPublisher) {
         this.walletRepository = walletRepository;
         this.walletCredentialRepository = walletCredentialRepository;
+        this.walletPresentationRepository = walletPresentationRepository;
         this.didService = didService;
         this.credentialIssuanceService = credentialIssuanceService;
         this.oid4vciSessionService = oid4vciSessionService;
+        this.keyService = keyService;
         this.auditEventPublisher = auditEventPublisher;
     }
 
@@ -139,6 +161,33 @@ public class WalletService {
         walletCredentialRepository.save(walletCredential);
         audit(tenantId, "WALLET_CREDENTIAL_RECEIVED", wallet.getId());
         return new WalletCredentialView(walletCredential, credential);
+    }
+
+    @Transactional
+    public WalletPresentation presentCredential(UUID tenantId, UUID walletId, UUID walletCredentialId,
+                                                 String audience, String nonce) {
+        Wallet wallet = get(tenantId, walletId);
+        WalletCredential wc = walletCredentialRepository.findByTenantIdAndWalletIdAndId(tenantId, walletId, walletCredentialId)
+                .orElseThrow(() -> new ApiException(ApiErrorCode.RESOURCE_NOT_FOUND,
+                        "Credential not found in wallet: " + walletCredentialId));
+        Credential credential = credentialIssuanceService.get(tenantId, wc.getCredentialId());
+        Did holderDid = didService.get(tenantId, wallet.getDidId());
+        ManagedKey signingKey = keyService.getActiveKeyForDid(holderDid.getId());
+
+        WalletPresentationSigner.SignedPresentation signed = WalletPresentationSigner.sign(
+                tenantId, holderDid, audience, nonce, List.of(credential.getCredentialJwt()),
+                Instant.now().plus(PRESENTATION_TTL), signingKey, keyService);
+
+        WalletPresentation presentation = new WalletPresentation(tenantId, wallet.getId(), wc.getId(), audience, nonce,
+                signed.jwt());
+        walletPresentationRepository.save(presentation);
+        audit(tenantId, "WALLET_PRESENTATION_GENERATED", wallet.getId());
+        return presentation;
+    }
+
+    public List<WalletPresentation> listPresentations(UUID tenantId, UUID walletId) {
+        get(tenantId, walletId);
+        return walletPresentationRepository.findByTenantIdAndWalletId(tenantId, walletId);
     }
 
     private void audit(UUID tenantId, String action, UUID walletId) {

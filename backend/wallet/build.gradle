@@ -2,6 +2,10 @@ dependencies {
     implementation project(':common')
     implementation project(':did')
     implementation project(':credential')
+    // Explicit rather than relying on transitivity (did/build.gradle's precedent): WalletService
+    // and WalletPresentationSigner call com.idtrust.kms.key.KeyService/ManagedKey directly for
+    // FR-WAL-012 (Generate Presentation), just like credential/build.gradle does for issuance.
+    implementation project(':kms')
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     // Oid4vciOfferGenerator serializes the offer payload with Jackson's ObjectMapper, matching

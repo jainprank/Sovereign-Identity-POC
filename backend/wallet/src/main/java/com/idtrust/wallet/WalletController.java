@@ -91,4 +91,20 @@ public class WalletController {
                 walletService.claim(TenantContext.requireTenantId(), id, request.preAuthorizedCode());
         return ResponseEntity.status(HttpStatus.CREATED).body(WalletDtos.WalletCredentialResponse.from(view));
     }
+
+    @PostMapping("/{id}/credentials/{credentialId}/present")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'HOLDER')")
+    public ResponseEntity<WalletDtos.PresentationResponse> present(@PathVariable UUID id, @PathVariable UUID credentialId,
+                                                                     @Valid @RequestBody WalletDtos.PresentRequest request) {
+        var presentation = walletService.presentCredential(
+                TenantContext.requireTenantId(), id, credentialId, request.audience(), request.nonce());
+        return ResponseEntity.status(HttpStatus.CREATED).body(WalletDtos.PresentationResponse.from(presentation));
+    }
+
+    @GetMapping("/{id}/presentations")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'HOLDER')")
+    public List<WalletDtos.PresentationResponse> listPresentations(@PathVariable UUID id) {
+        return walletService.listPresentations(TenantContext.requireTenantId(), id).stream()
+                .map(WalletDtos.PresentationResponse::from).toList();
+    }
 }

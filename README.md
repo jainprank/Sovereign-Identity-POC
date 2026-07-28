@@ -54,7 +54,7 @@ Build order agreed 2026-07-28:
 | E07 | Credential Issuance | ⚠️ implemented, unverified (no local build yet) |
 | E08 | Status / Revocation | ⚠️ implemented, unverified (no local build yet) |
 | E09 | OID4VCI / Wallets | ⚠️ implemented, unverified (no local build yet) |
-| E10 | OID4VP / Verification | pending |
+| E10 | OID4VP / Verification | ⚠️ implemented, unverified (no local build yet) |
 | E11 | SD-JWT | pending |
 | E12 | Trust Registry | pending |
 | E13 | Hedera | pending |
@@ -343,6 +343,97 @@ credential this platform issued in E07:
   implemented — see above.
 - FR-WAL-010 through 022 (presentation flows, backup/recovery, multi-device sync, lock/PIN,
   biometric, offline mode) are not implemented — deferred to E10 or later, see above.
+
+## E10: OID4VP & Verification
+
+The new `verification` module implements EPIC 10 (Verification, FR-VER-*), EPIC 11 (OID4VP &
+DCQL, FR-OID4VP-*) and EPIC 12 (Policy Engine, FR-POL-*) — all three are combined into this single
+epic per the agreed build order, since the Policy Engine was already scoped into `verification`
+back in E01 and is a hard prerequisite for FR-VER-001/013. The wallet-side half of the OID4VP
+handshake (generating and signing a Verifiable Presentation) is added to the existing `wallet`
+module in this same pass, in a new `com.idtrust.wallet.oid4vp` package.
+
+- **Policy Engine** (`com.idtrust.verification.policy`, FR-POL-001 through 011): `VerificationPolicy`
+  is versioned by row exactly like `credential.schema.CredentialSchema` — `DRAFT` (editable) →
+  `ACTIVE` (immutable, referenceable by verification requests) → `INACTIVE`, with
+  `createNewVersion` creating a new row rather than mutating an active policy's rules. Rules
+  (`PolicyDefinition`, FR-POL-006 through 011) are a single JSONB payload: an optional
+  `schemaId`, `requiredClaims`, `requireActiveStatus`, `requireNotExpired`, and
+  `trustedIssuerDids` — a static allowlist stand-in for FR-POL-011/FR-VER-012 (Trust Rule/Verify
+  Trust), since the full dynamic Trust Registry (EPIC 13) doesn't exist until E12. An empty
+  `trustedIssuerDids` list means "trust any issuer" rather than failing closed.
+- **Verification requests** (`VerificationRequest`, `VerificationService`, FR-VER-001/002/003/015):
+  `createRequest` loads an `ACTIVE` policy, generates a random `nonce` (anti-replay,
+  FR-OID4VP-012), and builds an `openid4vp://` request URI + QR PNG via the new
+  `Oid4vpRequestGenerator` (mirrors `wallet.oid4vci.Oid4vciOfferGenerator`'s ZXing-based shape and
+  inherits the same "no base-URL config exists in this codebase" limitation for its embedded
+  `response_uri`). Requests expire after a 10-minute TTL, matching `Oid4vciSession`'s precedent.
+- **The verification pipeline** (`VerificationService#presentAndVerify`, FR-VER-006 through 014,
+  FR-OID4VP-004/005) is genuine cryptographic verification, not a superficial claims check. Given a
+  holder's signed VP JWT, it: decodes the JWT (new `credential.issuance.
+  JwtVerifiableCredentialVerifier` utility) → checks `nonce`/`aud` against the request → resolves
+  the holder DID via `DidService.resolve` (public, cross-tenant) and verifies the VP's own
+  signature, requiring the JWT's `kid` to be listed in the DID Document's `assertionMethod`/
+  `authentication` (defends against a valid signature over a substituted key) → does the same for
+  the embedded VC JWT against the *issuer's* DID → checks subject binding (VP's `iss` == VC's
+  `sub`, FR-VER-009 — real proof-of-possession, not string matching) → checks VC expiry, the
+  policy's `trustedIssuerDids` and `requiredClaims` → looks up credential status via
+  `CredentialIssuanceService`. Every individual check's pass/fail outcome is recorded in a
+  `checks` JSONB map (FR-VER-013), not just a final boolean.
+- **`JwtVerifiableCredentialVerifier`** (`com.idtrust.credential.issuance`) reverses
+  `did.provider.Ed25519Multibase`'s encoding by hand — strip the `z` multibase prefix, Base58-decode
+  (reusing `did.provider.Base58`), strip the 2-byte `0xed 0x01` Ed25519 multicodec prefix, then
+  `kms.crypto.Ed25519Codec.decodeRawPublicKey` — to reconstruct a `java.security.PublicKey` and
+  verify with the JDK's `Ed25519` `Signature` implementation. It takes an already-resolved DID
+  Document rather than resolving one itself, keeping it a pure, side-effect-free crypto utility.
+- **FR-VER-011 (Verify Status) known limitation**: credential status lookup only works reliably
+  when the credential's issuer belongs to the *same tenant* as the verification request —
+  `CredentialIssuanceService.get` is strictly tenant-scoped under RLS with no public cross-tenant
+  equivalent to `DidService.resolve`. A cross-tenant lookup failure is recorded as
+  `statusCheck: "UNKNOWN"` rather than failing the whole verification or crashing.
+- **Wallet-side presentation signing** (`wallet.oid4vp.WalletPresentationSigner`,
+  `WalletPresentation`, FR-WAL-011/012/017): structurally the mirror image of `credential.issuance.
+  JwtVerifiableCredentialSigner` — same header shape, same Ed25519-only restriction — except the
+  payload wraps a `vp.verifiableCredential` array of already-signed VC JWTs and carries
+  `aud`/`nonce` instead of an issuer's own claims. Signing with the holder's own KMS-backed key
+  (provisioned back in E09's `Wallet` creation) is genuine cryptographic proof of possession, not a
+  superficial claim match. Every signed presentation is recorded in a new `wallet_presentations`
+  history table. Only a single whole credential is presented per request in this pass —
+  multi-credential/derived-claim presentations (FR-WAL-013 through 016) are unbuilt extensions.
+- **Deliberate module-boundary decision**: `wallet` and `verification` do not depend on each other.
+  `POST /api/v1/wallets/{id}/credentials/{credentialId}/present` (authenticated, `HOLDER`) only
+  returns a signed VP JWT artifact to the calling holder client; that client is expected to
+  independently `POST` the artifact to the verifier's own
+  `POST /api/v1/verification-requests/{id}/present`. This mirrors real-world OID4VP, where the
+  wallet and verifier are different parties on different domains.
+- **Unauthenticated protocol endpoint, still tenant-scoped**: `POST
+  /api/v1/verification-requests/{id}/present` is `permitAll` in `SecurityConfig` — a holder's
+  wallet/client calls it with no Keycloak session — but still gets correct Row-Level Security
+  scoping via `TenantContextInterceptor`'s `X-Tenant-ID` header handling, the same established
+  pattern as E09's three OID4VCI protocol endpoints. Callers must always send `X-Tenant-ID` set to
+  the verifier's tenant.
+- **`VerificationPolicyController`** exposes `POST/GET /api/v1/verification-policies`, `GET/PATCH
+  /{id}`, `POST /{id}/activate`, `POST /{id}/deactivate`, `POST /{id}/versions`
+  (`PLATFORM_ADMIN`/`ORG_ADMIN`/`VERIFIER`). **`VerificationController`** exposes `POST/GET
+  /api/v1/verification-requests`, `GET /{id}` (same three roles) plus the `permitAll`
+  `POST /{id}/present` above. **`WalletController`** gains `POST /{id}/credentials/{credentialId}/
+  present` and `GET /{id}/presentations` (`PLATFORM_ADMIN`/`ORG_ADMIN`/`HOLDER`).
+- **Schema**: `V14__verification_core.sql` (`verification_policies`, `verification_requests`,
+  `wallet_presentations` tables) + `V15__verification_row_level_security.sql` (RLS policy,
+  mirroring the `V3`/`V5`/`V7`/`V9`/`V11`/`V13` pattern).
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E09.
+- FR-VER-011 (Verify Status) degrades to `UNKNOWN` for cross-tenant issuers — see above.
+- FR-VER-012/FR-POL-011 (Trust Rule) is a static per-policy allowlist, not the dynamic Trust
+  Registry (EPIC 13/FR-TRUST-*) — deferred to E12 per the build sequence.
+- Only one credential is checked per presentation (`vp.verifiableCredential[0]`) — multi-credential
+  presentations are unbuilt.
+- FR-WAL-013 through 016 (multi-credential/derived-claim presentations) are not implemented.
+- Selective disclosure for SD-JWT VCs (FR-OID4VP claims tied to `CredentialFormat.SD_JWT_VC`) is
+  deferred to E11, matching that format's already-reserved-but-unimplemented status since E06.
+- The OID4VP request URI's `response_uri` is a relative path (no base-URL config exists anywhere
+  in this codebase) — same documented limitation as E09's credential offer URIs.
 
 ## Prerequisites
 

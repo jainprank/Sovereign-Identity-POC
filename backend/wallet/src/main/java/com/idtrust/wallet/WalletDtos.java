@@ -1,6 +1,7 @@
 package com.idtrust.wallet;
 
 import com.idtrust.credential.issuance.CredentialDtos;
+import com.idtrust.wallet.oid4vp.WalletPresentation;
 import jakarta.validation.constraints.NotBlank;
 
 import java.time.Instant;
@@ -18,6 +19,9 @@ public final class WalletDtos {
     }
 
     public record RecategorizeRequest(String category) {
+    }
+
+    public record PresentRequest(@NotBlank String audience, @NotBlank String nonce) {
     }
 
     public record Response(
@@ -58,6 +62,20 @@ public final class WalletDtos {
                     view.walletCredential().getCategory(),
                     view.walletCredential().getReceivedAt(),
                     CredentialDtos.Response.from(view.credential())
+            );
+        }
+    }
+
+    public record PresentationResponse(UUID id, UUID walletId, UUID walletCredentialId, String audience,
+                                        String vpJwt, Instant presentedAt) {
+        public static PresentationResponse from(WalletPresentation presentation) {
+            return new PresentationResponse(
+                    presentation.getId(),
+                    presentation.getWalletId(),
+                    presentation.getWalletCredentialId(),
+                    presentation.getAudience(),
+                    presentation.getPresentationJwt(),
+                    presentation.getPresentedAt()
             );
         }
     }
