@@ -1,5 +1,6 @@
 package com.idtrust.common.web;
 
+import com.idtrust.common.tenant.CurrentApiClientContext;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.tenant.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,11 +20,12 @@ import java.util.UUID;
  * expected to validate that a tenant was resolved themselves (see the identity module's
  * TenantMembershipFilter).
  *
- * <p>Also clears {@link CurrentUserContext} at the end of every request: that context is
- * populated earlier in the request-processing pipeline by {@code TenantMembershipFilter} (a
- * servlet filter, which runs before this MVC interceptor), but this interceptor is the last place
- * still guaranteed to run for every dispatched request, so it is the safest single place to
- * guarantee both thread-locals are released back to the (pooled) request-handling thread.
+ * <p>Also clears {@link CurrentUserContext} and {@link CurrentApiClientContext} at the end of
+ * every request: those contexts are populated earlier in the request-processing pipeline by
+ * {@code TenantMembershipFilter}/{@code ApiKeyAuthenticationFilter} (servlet filters, which run
+ * before this MVC interceptor), but this interceptor is the last place still guaranteed to run for
+ * every dispatched request, so it is the safest single place to guarantee all three thread-locals
+ * are released back to the (pooled) request-handling thread.
  */
 public class TenantContextInterceptor implements HandlerInterceptor {
 
@@ -46,5 +48,6 @@ public class TenantContextInterceptor implements HandlerInterceptor {
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         TenantContext.clear();
         CurrentUserContext.clear();
+        CurrentApiClientContext.clear();
     }
 }

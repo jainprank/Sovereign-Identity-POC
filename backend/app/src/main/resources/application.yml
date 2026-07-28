@@ -79,3 +79,10 @@ idtrust:
     account-id: ${HEDERA_ACCOUNT_ID:}
     operator-key: ${HEDERA_OPERATOR_KEY:}
     topic-id: ${HEDERA_TOPIC_ID:}
+  apiplatform:
+    # FR-API-004 (Rate Limit) - in-memory, per-caller, fixed-window budget; see
+    # apiplatform.ratelimit.RateLimitFilter and ApiPlatformProperties' Javadoc for why this is not
+    # distributed.
+    rate-limit-requests-per-minute: ${API_RATE_LIMIT_REQUESTS_PER_MINUTE:120}
+    # FR-API-002 (OAuth Client) - client_credentials access token lifetime.
+    oauth-access-token-ttl-seconds: ${API_OAUTH_ACCESS_TOKEN_TTL_SECONDS:3600}

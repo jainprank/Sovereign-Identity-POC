@@ -8,6 +8,8 @@ import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import com.idtrust.common.webhook.WebhookEvent;
+import com.idtrust.common.webhook.WebhookEventPublisher;
 import com.idtrust.did.provider.DidCreationRequest;
 import com.idtrust.did.provider.DidMethod;
 import com.idtrust.did.provider.DidMethodProvider;
@@ -35,15 +37,17 @@ public class DidService {
     private final DidMethodProviderRegistry providerRegistry;
     private final AuditEventPublisher auditEventPublisher;
     private final HederaAnchorPublisher hederaAnchorPublisher;
+    private final WebhookEventPublisher webhookEventPublisher;
     private final ObjectMapper objectMapper;
 
     public DidService(DidRepository didRepository, DidMethodProviderRegistry providerRegistry,
                        AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
-                       ObjectMapper objectMapper) {
+                       WebhookEventPublisher webhookEventPublisher, ObjectMapper objectMapper) {
         this.didRepository = didRepository;
         this.providerRegistry = providerRegistry;
         this.auditEventPublisher = auditEventPublisher;
         this.hederaAnchorPublisher = hederaAnchorPublisher;
+        this.webhookEventPublisher = webhookEventPublisher;
         this.objectMapper = objectMapper;
     }
 
@@ -57,6 +61,7 @@ public class DidService {
         didRepository.save(did);
         audit(tenantId, "DID_CREATED", did.getId());
         anchorDocument(did);
+        publishWebhookEvent(did, "DIDCreated");
         return did;
     }
 
@@ -96,6 +101,7 @@ public class DidService {
         DidProviderResult result = providerRegistry.get(did.getMethod()).update(did);
         did.replaceDocument(result.document());
         audit(tenantId, "DID_KEY_ROTATED", did.getId());
+        publishWebhookEvent(did, "DIDUpdated");
         return did;
     }
 
@@ -105,6 +111,7 @@ public class DidService {
         providerRegistry.get(did.getMethod()).deactivate(did);
         did.deactivate();
         audit(tenantId, "DID_DEACTIVATED", did.getId());
+        publishWebhookEvent(did, "DIDUpdated");
         return did;
     }
 
@@ -138,6 +145,16 @@ public class DidService {
                     did.getTenantId(), "DID_ANCHORED", "DID", did.getId(), content));
         } catch (Exception e) {
             // Never let an anchoring failure affect DID creation itself.
+        }
+    }
+
+    /** EPIC 14 (FR-API-008 Webhooks) - relays a DID lifecycle change to this tenant's subscribed webhooks. */
+    private void publishWebhookEvent(Did did, String eventType) {
+        try {
+            webhookEventPublisher.publish(WebhookEvent.of(did.getTenantId(), eventType, "DID", did.getId(),
+                    Map.of("did", did.getDid())));
+        } catch (Exception e) {
+            // Never let a webhook delivery failure affect the DID operation itself.
         }
     }
 }

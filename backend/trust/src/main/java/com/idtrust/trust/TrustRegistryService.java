@@ -8,6 +8,8 @@ import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import com.idtrust.common.webhook.WebhookEvent;
+import com.idtrust.common.webhook.WebhookEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,15 +48,17 @@ public class TrustRegistryService {
     private final TrustedIssuerRepository issuerRepository;
     private final AuditEventPublisher auditEventPublisher;
     private final HederaAnchorPublisher hederaAnchorPublisher;
+    private final WebhookEventPublisher webhookEventPublisher;
     private final ObjectMapper objectMapper;
 
     public TrustRegistryService(TrustRegistryRepository registryRepository, TrustedIssuerRepository issuerRepository,
                                  AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
-                                 ObjectMapper objectMapper) {
+                                 WebhookEventPublisher webhookEventPublisher, ObjectMapper objectMapper) {
         this.registryRepository = registryRepository;
         this.issuerRepository = issuerRepository;
         this.auditEventPublisher = auditEventPublisher;
         this.hederaAnchorPublisher = hederaAnchorPublisher;
+        this.webhookEventPublisher = webhookEventPublisher;
         this.objectMapper = objectMapper;
     }
 
@@ -110,6 +114,7 @@ public class TrustRegistryService {
         issuerRepository.save(issuer);
         audit(tenantId, "TRUSTED_ISSUER_REGISTERED", "TRUSTED_ISSUER", issuer.getId());
         anchorIssuer(issuer);
+        publishWebhookEvent(issuer);
         return issuer;
     }
 
@@ -143,6 +148,7 @@ public class TrustRegistryService {
         issuer.updateStatus(status);
         audit(tenantId, "TRUSTED_ISSUER_STATUS_UPDATED", "TRUSTED_ISSUER", issuer.getId());
         anchorIssuer(issuer);
+        publishWebhookEvent(issuer);
         return issuer;
     }
 
@@ -152,6 +158,7 @@ public class TrustRegistryService {
         issuer.revoke();
         audit(tenantId, "TRUSTED_ISSUER_REVOKED", "TRUSTED_ISSUER", issuer.getId());
         anchorIssuer(issuer);
+        publishWebhookEvent(issuer);
         return issuer;
     }
 
@@ -220,5 +227,16 @@ public class TrustRegistryService {
     }
 
     private record AnchoredIssuer(String issuerDid, String organization, List<String> trustedCredentialTypes, String status) {
+    }
+
+    /** EPIC 14 (FR-API-008 Webhooks) - relays a trusted-issuer mutation to this tenant's subscribed webhooks. */
+    private void publishWebhookEvent(TrustedIssuer issuer) {
+        try {
+            webhookEventPublisher.publish(WebhookEvent.of(issuer.getTenantId(), "TrustRegistryUpdated",
+                    "TRUSTED_ISSUER", issuer.getId(), Map.of("issuerDid", issuer.getIssuerDid(),
+                            "status", issuer.getStatus().name())));
+        } catch (Exception e) {
+            // Never let a webhook delivery failure affect the trust registry mutation itself.
+        }
     }
 }

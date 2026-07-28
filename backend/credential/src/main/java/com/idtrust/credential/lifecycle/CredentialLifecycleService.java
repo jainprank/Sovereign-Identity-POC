@@ -60,6 +60,7 @@ public class CredentialLifecycleService {
             throw new ApiException(ApiErrorCode.INVALID_REQUEST, "An expired credential cannot be revoked: " + id);
         }
         transition(tenantId, credential, CredentialStatus.REVOKED, reason, credential::revoke, "CREDENTIAL_REVOKED");
+        credentialIssuanceService.publishWebhookEvent(credential, "CredentialRevoked");
         return credential;
     }
 
@@ -68,6 +69,7 @@ public class CredentialLifecycleService {
         Credential credential = requireStatus(tenantId, id, CredentialStatus.ISSUED,
                 "Only an ISSUED credential can be suspended");
         transition(tenantId, credential, CredentialStatus.SUSPENDED, reason, credential::suspend, "CREDENTIAL_SUSPENDED");
+        credentialIssuanceService.publishWebhookEvent(credential, "CredentialSuspended");
         return credential;
     }
 

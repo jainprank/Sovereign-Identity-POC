@@ -17,3 +17,4 @@ include 'wallet'        // E09 - Wallet + OID4VCI
 include 'verification'  // E10 - OID4VP / verification
 include 'trust'         // E12 - Trust registry
 include 'hedera'        // E13 - Hedera trust adapter
+include 'apiplatform'   // E14 - API & developer platform (API keys, OAuth clients, webhooks)

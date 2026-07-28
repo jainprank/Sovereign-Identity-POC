@@ -5,6 +5,8 @@ import com.idtrust.common.audit.AuditEventPublisher;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import com.idtrust.common.webhook.WebhookEvent;
+import com.idtrust.common.webhook.WebhookEventPublisher;
 import com.idtrust.credential.issuance.Credential;
 import com.idtrust.credential.issuance.CredentialIssuanceService;
 import com.idtrust.credential.issuance.CredentialStatus;
@@ -86,16 +88,19 @@ public class VerificationService {
     private final CredentialIssuanceService credentialIssuanceService;
     private final TrustRegistryService trustRegistryService;
     private final AuditEventPublisher auditEventPublisher;
+    private final WebhookEventPublisher webhookEventPublisher;
 
     public VerificationService(VerificationRequestRepository requestRepository, VerificationPolicyService policyService,
                                 DidService didService, CredentialIssuanceService credentialIssuanceService,
-                                TrustRegistryService trustRegistryService, AuditEventPublisher auditEventPublisher) {
+                                TrustRegistryService trustRegistryService, AuditEventPublisher auditEventPublisher,
+                                WebhookEventPublisher webhookEventPublisher) {
         this.requestRepository = requestRepository;
         this.policyService = policyService;
         this.didService = didService;
         this.credentialIssuanceService = credentialIssuanceService;
         this.trustRegistryService = trustRegistryService;
         this.auditEventPublisher = auditEventPublisher;
+        this.webhookEventPublisher = webhookEventPublisher;
     }
 
     @Transactional
@@ -153,6 +158,7 @@ public class VerificationService {
             request.fail(result.failureReason(), checks);
             audit(tenantId, "VERIFICATION_REQUEST_FAILED", request.getId());
         }
+        publishWebhookEvent(request);
         return request;
     }
 
@@ -366,6 +372,16 @@ public class VerificationService {
                 "SUCCESS",
                 Map.of()
         ));
+    }
+
+    /** EPIC 14 (FR-API-008 Webhooks) - relays every completed verification attempt, pass or fail. */
+    private void publishWebhookEvent(VerificationRequest request) {
+        try {
+            webhookEventPublisher.publish(WebhookEvent.of(request.getTenantId(), "VerificationCompleted",
+                    "VERIFICATION_REQUEST", request.getId(), Map.of("status", request.getStatus().name())));
+        } catch (Exception e) {
+            // Never let a webhook delivery failure affect the verification result itself.
+        }
     }
 
     public record RequestResult(VerificationRequest request, Oid4vpRequestGenerator.Request oid4vpRequest) {

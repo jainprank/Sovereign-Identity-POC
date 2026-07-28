@@ -7,6 +7,8 @@ import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import com.idtrust.common.webhook.WebhookEvent;
+import com.idtrust.common.webhook.WebhookEventPublisher;
 import com.idtrust.credential.issuance.sdjwt.SdJwtVcSigner;
 import com.idtrust.credential.schema.CredentialFormat;
 import com.idtrust.credential.schema.CredentialSchema;
@@ -51,16 +53,19 @@ public class CredentialIssuanceService {
     private final KeyService keyService;
     private final AuditEventPublisher auditEventPublisher;
     private final HederaAnchorPublisher hederaAnchorPublisher;
+    private final WebhookEventPublisher webhookEventPublisher;
 
     public CredentialIssuanceService(CredentialRepository credentialRepository, CredentialSchemaService schemaService,
                                       DidService didService, KeyService keyService,
-                                      AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher) {
+                                      AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
+                                      WebhookEventPublisher webhookEventPublisher) {
         this.credentialRepository = credentialRepository;
         this.schemaService = schemaService;
         this.didService = didService;
         this.keyService = keyService;
         this.auditEventPublisher = auditEventPublisher;
         this.hederaAnchorPublisher = hederaAnchorPublisher;
+        this.webhookEventPublisher = webhookEventPublisher;
     }
 
     @Transactional
@@ -99,6 +104,7 @@ public class CredentialIssuanceService {
         credentialRepository.save(credential);
         audit(tenantId, "CREDENTIAL_ISSUED", credential.getId());
         anchorCredential(credential);
+        publishWebhookEvent(credential, "CredentialIssued");
 
         CredentialOfferGenerator.CredentialOffer offer = CredentialOfferGenerator.generate(issuerDid, credentialId);
         return new IssuedCredential(credential, offer);
@@ -139,6 +145,20 @@ public class CredentialIssuanceService {
                     credential.getCredentialHash()));
         } catch (Exception e) {
             // Never let an anchoring failure affect credential issuance itself.
+        }
+    }
+
+    /**
+     * EPIC 14 (FR-API-008 Webhooks) - relays a credential lifecycle change to this tenant's
+     * subscribed webhooks. Public so {@code credential.lifecycle.CredentialLifecycleService} can
+     * reuse it for FR-CRED-* status transitions rather than duplicating the wrapper.
+     */
+    public void publishWebhookEvent(Credential credential, String eventType) {
+        try {
+            webhookEventPublisher.publish(WebhookEvent.of(credential.getTenantId(), eventType, "CREDENTIAL",
+                    credential.getId(), Map.of("status", credential.getStatus().name())));
+        } catch (Exception e) {
+            // Never let a webhook delivery failure affect the credential operation itself.
         }
     }
 

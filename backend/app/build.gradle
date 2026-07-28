@@ -13,6 +13,7 @@ dependencies {
     implementation project(':verification')
     implementation project(':trust')
     implementation project(':hedera')
+    implementation project(':apiplatform')
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'

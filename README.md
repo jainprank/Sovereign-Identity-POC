@@ -58,7 +58,7 @@ Build order agreed 2026-07-28:
 | E11 | SD-JWT | ⚠️ implemented, unverified (no local build yet) |
 | E12 | Trust Registry | ⚠️ implemented, unverified (no local build yet) |
 | E13 | Hedera | ⚠️ implemented, unverified (no local build yet) |
-| E14 | Enterprise Integrations | pending |
+| E14 | Enterprise Integrations | ⚠️ implemented, unverified (no local build yet) |
 | E15 | UI / QA / Security / Production | pending |
 
 ## E02/E03: IAM, Tenancy, RBAC, Row-Level Security
@@ -630,6 +630,116 @@ previously-empty `hedera` module placeholder from E01.
 - `HederaAnchorController` has no endpoint to list anchors across resource types for a tenant (only
   per-resource `listForResource`) — acceptable for now since anchors are always looked up starting
   from a known DID/schema/credential/trusted-issuer.
+
+## E14: API & Developer Platform
+
+Implements EPIC 14 (API & Developer Platform): FR-API-001 (API Key), FR-API-002 (OAuth Client),
+FR-API-003 (API Scope), FR-API-004 (Rate Limit), FR-API-005 (API Versioning — already satisfied by
+every controller's existing `/api/v1/...` prefix, no new code needed), FR-API-006 (OpenAPI
+Documentation), FR-API-007 (API Logs), FR-API-008 (Webhooks) and FR-API-009 (Webhook Retry), on a
+brand-new `apiplatform` module (the first epic requiring one — no pre-scaffolded placeholder
+existed for it in E01, unlike every prior epic).
+
+- **`ApiClient`** (`api_clients`): a single table for both API keys and OAuth clients
+  (`ApiClientType.API_KEY`/`OAUTH_CLIENT`), matching the Baseline ERD's one `API_CLIENT` node.
+  `secretHash` is a SHA-256 hash (`auth.CredentialHasher`) of the plaintext API key or OAuth client
+  secret, revealed to the caller exactly once at creation time (`ApiClientCreationResult`) and never
+  stored in the clear — mirroring `WebhookEndpointService`'s one-time-secret-reveal pattern. `scopes`
+  (FR-API-003) is a comma-separated subset of `client.ApiScopes.VALID_ROLE_CODES` — a hardcoded copy
+  of the 5 RBAC role codes (`PLATFORM_ADMIN`, `ORG_ADMIN`, `ISSUER`, `VERIFIER`, `HOLDER`) rather than
+  a live query against `identity.rbac.Role`, deliberately avoiding a new `apiplatform → identity`
+  Gradle dependency — every existing `@PreAuthorize` annotation already hardcodes these same literals.
+- **`ApiKeyAuthenticationFilter`** (new, in `identity.security`, registered in `SecurityConfig` via
+  `.addFilterBefore(..., BearerTokenAuthenticationFilter.class)`): recognizes an API key or OAuth
+  access token bearer credential ahead of Spring Security's normal Keycloak JWT resource-server
+  path, and falls through harmlessly (no-op) if the token isn't recognized, letting a genuine JWT
+  proceed as before. Decoupled via a new `common.security.ApiCredentialAuthenticator` interface
+  (`+ApiPrincipal` record) — `identity` cannot depend on the new `apiplatform` module (which needs
+  spring-security types not available in `common`), so the concrete authenticator
+  (`apiplatform.auth.ApiClientCredentialAuthenticator`) is auto-wired by Spring purely because `app`
+  depends on both modules, mirroring `AuditEventPublisher`/`HederaAnchorPublisher`'s no-explicit-
+  default-bean precedent exactly. A new `common.tenant.CurrentApiClientContext` ThreadLocal (cleared
+  in `TenantContextInterceptor.afterCompletion`, mirroring `CurrentUserContext`) records which
+  `ApiClient` authenticated the current request.
+- **`OAuthTokenService`** (FR-API-002, `POST /api/v1/oauth/token`, `client_credentials` grant):
+  mints an **opaque, hashed, server-verified** `ApiAccessToken` (`api_access_tokens`) — deliberately
+  not a self-signed JWT, reusing exactly the same hash-lookup mechanism already needed for API keys
+  rather than introducing a new JWT-signing/verification path (this platform's only existing
+  JWT-signing dependency is `kms`'s DID/credential-signing pipeline, a poor fit for a generic OAuth
+  token). Token lifetime is configurable via `idtrust.apiplatform.oauth-access-token-ttl-seconds`.
+- **`RateLimitFilter`** (FR-API-004, `@Order(10)`): an in-memory, per-caller (API client id if
+  authenticated, else tenant id, else remote address), fixed-window budget
+  (`idtrust.apiplatform.rate-limit-requests-per-minute`, default 120/min), returning `429` with a
+  JSON body on exhaustion — not distributed (no Redis client exists anywhere in this codebase); a
+  documented limitation, not an oversight, if this modular monolith is ever horizontally scaled.
+- **`OpenApiConfig`** (FR-API-006): adds `springdoc-openapi-starter-webmvc-ui:2.6.0` for a genuine,
+  auto-generated OpenAPI 3 spec and Swagger UI (`/v3/api-docs`, `/swagger-ui.html`), with a
+  `bearerAuth` HTTP bearer security scheme declared once and applied everywhere.
+- **`ApiRequestLog`** (`api_request_logs`, FR-API-007) + **`ApiRequestLoggingFilter`**
+  (`@Order(0)`, outermost so it captures the rate limiter's own `429` short-circuits): one row per
+  completed request (method/path/status/duration/correlationId/tenantId/apiClientId — the latter two
+  nullable, since an unauthenticated or platform-level request never resolves either), queryable via
+  `GET /api/v1/api-request-logs`. Both new filters sit at small positive `@Order` values, greater
+  than Spring Security's `FilterChainProxy` (`-100`), so `SecurityContextHolder`/`TenantContext`/
+  `CurrentApiClientContext` are already populated when they run.
+- **`WebhookEndpoint`/`WebhookDelivery`** (`webhook_endpoints`/`webhook_deliveries`, FR-API-008) +
+  **`WebhookEventPublisherImpl`**: the single real `common.webhook.WebhookEventPublisher`
+  implementation, mirroring `HederaAnchorPublisher`'s interface-in-`common`-plus-single-impl
+  pattern. For every active, subscribed endpoint of a tenant, performs a genuine HTTP POST (JDK
+  `HttpClient`) with an HMAC-SHA256-signed body (`X-IDTrust-Signature`, `webhook.WebhookSigner`),
+  and always persists a `WebhookDelivery` row recording the outcome — never throws, so a delivery
+  failure (network error, non-2xx, even a failed endpoint lookup) never affects the domain operation
+  that triggered it. `WebhookEndpoint.encryptedSecret` is genuinely **encrypted** (not hashed) via
+  `kms.crypto.KeyEncryptionService`, unlike `ApiClient.secretHash`, because the plaintext secret must
+  be recoverable to compute the outbound signature on every delivery. `webhook.WebhookEventTypes` is
+  a fixed 10-name vocabulary (`CredentialIssued`, `CredentialRevoked`, `CredentialSuspended`,
+  `VerificationCompleted`, `DIDCreated`, `DIDUpdated`, `TrustRegistryUpdated`,
+  `HederaAnchorRequested`, `HederaAnchorCompleted`, `AuditEventCreated`) — the same Kafka event-type
+  names already catalogued in the Baseline's section 6, reused here since no Kafka broker exists
+  anywhere in this codebase.
+- **Webhook call sites**: `DidService` (`DIDCreated` on `create`, `DIDUpdated` on `rotate`/
+  `deactivate`), `TrustRegistryService` (`TrustRegistryUpdated` on `registerIssuer`/`updateStatus`/
+  `revokeTrust`), `CredentialIssuanceService` (`CredentialIssued` on `issue` — also naturally covers
+  `CredentialLifecycleService.renew`/`reissue`, which call `issue` internally),
+  `CredentialLifecycleService` (`CredentialRevoked` on `revoke`, `CredentialSuspended` on
+  `suspend`), `VerificationService` (`VerificationCompleted` on `presentAndVerify`, fired for both
+  pass and fail outcomes). `AuditEventCreated` is wired once, at a single choke point
+  (`LoggingAuditEventPublisher.publish`) rather than threaded through every module that emits an
+  `AuditEvent` — every audited mutation across the whole codebase is relayed with zero per-module
+  wiring; skipped for platform-level events with no `tenantId` or a non-UUID `resourceId`.
+  `CredentialSchemaService` has no wiring: no event type in the fixed vocabulary corresponds to a
+  schema mutation.
+- **`WebhookDeliveryService#retry`** (FR-API-009): manual-only, mirroring
+  `HederaAnchorService#retry`'s exact "guarded by status, no background daemon" precedent — only
+  legal from a `FAILED` delivery; there is no background auto-retry/backoff scheduler anywhere in
+  this codebase.
+- **`WebhookController`** (`/api/v1/webhooks`) + **`ApiClientController`** (`/api/v1/api-clients`):
+  both restricted to `PLATFORM_ADMIN`/`ORG_ADMIN`, mirroring every other admin-mutation-style
+  controller — issuing a machine credential or registering an outbound webhook (with its signing
+  secret) is a privileged operation.
+- **`V20__apiplatform_core.sql`/`V21__apiplatform_row_level_security.sql`**: all 5 new tables plus
+  the standard tenant-isolation RLS policy pattern from every prior epic — `api_request_logs`'
+  policy additionally allows `tenant_id IS NULL` rows, since `ApiRequestLoggingFilter` runs before
+  `TenantContext` may have been populated for an unauthenticated request.
+
+**Deliberately deferred (documented, not overlooked):**
+- FR-API-010 (Sandbox Environment), FR-API-011 (Developer Portal) and FR-API-012 (SDK Generation)
+  are V1/V2-priority items requiring substantial new infrastructure (an isolated sandbox tenant
+  tier, a dedicated portal UI, a codegen pipeline) disproportionate to this pass — out of scope,
+  mirroring every prior epic's precedent of explicitly documenting skipped items rather than
+  building speculative stand-ins.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E13.
+- `RateLimitFilter`'s budget is in-memory and per-instance, not distributed — see FR-API-004's note
+  above; revisit if this modular monolith is ever horizontally scaled.
+- OAuth access tokens are opaque and server-verified, not self-signed JWTs — a deliberate
+  simplification (see `auth.ApiAccessToken`'s Javadoc), not a spec deviation, since FR-API-002 only
+  requires a valid `client_credentials` grant, not a specific token format.
+- Webhook retry (FR-API-009) is manual-only; a delivery that keeps failing stays `FAILED` until an
+  admin retries it — there is no exponential-backoff daemon anywhere in this codebase yet.
+- No integration test exercises the new `ApiKeyAuthenticationFilter`/`RateLimitFilter`/webhook HTTP
+  delivery path against a real HTTP server.
 
 ## Prerequisites
 

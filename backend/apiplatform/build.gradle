@@ -1,0 +1,16 @@
+dependencies {
+    implementation project(':common')
+    // WebhookEndpoint.secret is encrypted at rest via KeyEncryptionService (FR-API-008) - the same
+    // AES-256 KEK ManagedKey private keys are already encrypted with, rather than duplicating that
+    // crypto scheme here.
+    implementation project(':kms')
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    // Explicit rather than relying on transitivity: WebhookEventPublisherImpl serializes the
+    // outbound delivery payload and ApiRequestLoggingFilter/RateLimitFilter write ApiError JSON
+    // bodies directly, all with Jackson's ObjectMapper.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    // FR-API-006 (OpenAPI) - genuine generated API docs + Swagger UI over the already-annotated
+    // controllers across every module.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
+}
