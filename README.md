@@ -50,7 +50,7 @@ Build order agreed 2026-07-28:
 | E03 | Database / Row-Level Security | ⚠️ implemented, unverified (no local build yet) |
 | E04 | DID | ⚠️ implemented, unverified (no local build yet) |
 | E05 | KMS / Key Lifecycle | ⚠️ implemented, unverified (no local build yet) |
-| E06 | Schemas / Templates | pending |
+| E06 | Schemas / Templates | ⚠️ implemented, unverified (no local build yet) |
 | E07 | Credential Issuance | pending |
 | E08 | Status / Revocation | pending |
 | E09 | OID4VCI / Wallets | pending |
@@ -135,6 +135,34 @@ The `kms` and `did` modules now implement:
   were left out as premature scope.
 - `InternalKeyProvider.deactivate`/`delete` are no-ops beyond status transitions (there's no
   external key material to revoke yet) — meaningful once `AWS_KMS`/`VAULT`/`HSM` providers exist.
+
+## E06: Credential Schemas
+
+The `credential` module now implements schema management (EPIC 5, FR-SCH-*):
+
+- **`CredentialSchema`** (`credential_schemas` table, tenant-owned, RLS-protected): versioned by
+  row rather than by mutating history — `name`/`version`/`tenant_id` is unique, so publishing a
+  schema (FR-SCH-005) freezes that version for issuance to reference, and versioning
+  (FR-SCH-004) creates a new row with the same `name` and a new `version` rather than editing the
+  published one. Lifecycle: `DRAFT` (freely editable) → `PUBLISHED` (immutable) → `DEPRECATED`
+  (no longer intended for new issuance; already-issued credentials keep referencing it).
+- **Claim catalogue**: each schema's claims (name, `ClaimType` — `STRING`/`NUMBER`/`BOOLEAN`/
+  `DATE`, required/optional, description, optional `ClaimValidation` and `ClaimDisplay`) are
+  stored as a typed `SchemaDefinition` in the `schema` JSONB column — covers FR-SCH-007 through
+  FR-SCH-011 (required/optional claims, data types, validation rules, display metadata).
+- **`CredentialFormat`** reserves `W3C_VC` (implemented, used by E07) and `SD_JWT_VC` (reserved
+  for E11), mirroring how `KeyProviderType`/`DidMethod` reserve values for methods not yet built.
+- `CredentialSchemaController` exposes create/search/get/update/publish/deprecate plus
+  `POST /{id}/versions` (FR-SCH-014 Schema Search via optional `name`/`status` query params).
+  Mutations require `PLATFORM_ADMIN`/`ORG_ADMIN`/`ISSUER`; reads also allow `VERIFIER` (verifiers
+  need schema claims to build verification policies, FR-VER-002).
+- FR-SCH-012/013 (Import/Export) are V1-priority and out of scope for this pass.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E05.
+- No claim-validation engine exists yet — `ClaimValidation` rules are stored and round-tripped but
+  not enforced anywhere; that lands with credential issuance (E07), which validates claims against
+  a schema before signing.
 
 ## Prerequisites
 
