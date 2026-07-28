@@ -1,0 +1,19 @@
+rootProject.name = 'idtrust-backend'
+
+// Composition root - the deployable Spring Boot application
+include 'app'
+
+// Shared kernel used by every domain module (tenant context, auditing, error handling)
+include 'common'
+
+// Domain modules - one per platform capability. Scaffolded now as placeholders so the
+// module boundaries described in the Architecture & Implementation Baseline are fixed
+// from day one; each is filled in during its own epic (see root README for the mapping).
+include 'identity'      // E02 - Org/Tenant/User/RBAC
+include 'did'           // E04 - DID lifecycle
+include 'kms'           // E05 - Key management / KMS abstraction
+include 'credential'    // E06/E07/E08 - Schemas, issuance, status & revocation
+include 'wallet'        // E09 - Wallet + OID4VCI
+include 'verification'  // E10 - OID4VP / verification
+include 'trust'         // E12 - Trust registry
+include 'hedera'        // E13 - Hedera trust adapter

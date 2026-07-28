@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: idtrust
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/idtrust}
+    username: ${DATABASE_USERNAME:idtrust}
+    password: ${DATABASE_PASSWORD:idtrust}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    readinessstate:
+      enabled: true
+    livenessstate:
+      enabled: true
+
+logging:
+  pattern:
+    level: "%5p [%X{correlationId}]"
+
+# Placeholders for identity/KMS/trust-layer configuration introduced in later epics.
+# Kept here (commented) so the full external configuration surface is visible from E01 onward -
+# see the Architecture & Implementation Baseline, section 19 ("Docker Compose Baseline").
+#
+# idtrust:
+#   keycloak:
+#     url: ${KEYCLOAK_URL:}
+#     realm: ${KEYCLOAK_REALM:idtrust}
+#     client-id: ${KEYCLOAK_CLIENT_ID:idtrust-app}
+#     client-secret: ${KEYCLOAK_CLIENT_SECRET:}
+#   kms:
+#     provider: ${KMS_PROVIDER:internal}
+#   hedera:
+#     network: ${HEDERA_NETWORK:testnet}
+#     account-id: ${HEDERA_ACCOUNT_ID:}
+#     operator-key: ${HEDERA_OPERATOR_KEY:}
+#     topic-id: ${HEDERA_TOPIC_ID:}

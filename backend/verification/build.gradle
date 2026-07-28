@@ -1,0 +1,7 @@
+dependencies {
+    implementation project(':common')
+    implementation project(':did')
+    implementation project(':credential')
+    implementation project(':trust')
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+}

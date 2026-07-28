@@ -1,0 +1,31 @@
+# Environment
+.env
+
+# Gradle
+backend/.gradle/
+backend/**/build/
+!backend/**/src/**/build/
+
+# Java
+*.class
+*.jar
+!backend/gradle/wrapper/gradle-wrapper.jar
+
+# Node / frontend (added when the frontend app is scaffolded)
+node_modules/
+.next/
+dist/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Claude Code local project state
+.claude/
+
+# Logs
+*.log
