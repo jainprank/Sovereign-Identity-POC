@@ -2,4 +2,8 @@ dependencies {
     implementation project(':common')
     implementation project(':kms')
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    // Explicit rather than relying on transitivity: DidWebProvider parses resolved DID
+    // Documents with Jackson's ObjectMapper.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
 }

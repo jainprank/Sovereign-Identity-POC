@@ -48,8 +48,8 @@ Build order agreed 2026-07-28:
 | E01 | Foundation (this scaffold: repo, Docker Compose, CI, health check, module skeleton) | ✅ done |
 | E02 | IAM / Tenancy / RBAC | ⚠️ implemented, unverified (no local build yet) |
 | E03 | Database / Row-Level Security | ⚠️ implemented, unverified (no local build yet) |
-| E04 | DID | pending |
-| E05 | KMS / Key Lifecycle | pending |
+| E04 | DID | ⚠️ implemented, unverified (no local build yet) |
+| E05 | KMS / Key Lifecycle | ⚠️ implemented, unverified (no local build yet) |
 | E06 | Schemas / Templates | pending |
 | E07 | Credential Issuance | pending |
 | E08 | Status / Revocation | pending |
@@ -94,6 +94,47 @@ The `identity` module now implements:
   acceptance, which does link `keycloak_subject_id`) is out of scope for this pass —
   `TenantMembershipFilter` resolves users by `keycloak_subject_id` first, falling back to the JWT
   `email` claim, but does not auto-link on that fallback path.
+
+## E04/E05: DID Lifecycle, KMS/Key Management
+
+The `kms` and `did` modules now implement:
+
+- **Key management (`kms`)**: `ManagedKey` entities (`keys` table, tenant-owned, RLS-protected)
+  behind a `KeyProvider` abstraction (`type()`, `generateKey`, `sign`, `deactivate`, `delete`,
+  `healthCheck()`). Only `InternalKeyProvider` is implemented for now — JDK-native key generation
+  for `ED25519`, `SECP256K1`, `RSA_2048`, with private keys envelope-encrypted at rest
+  (`KeyEncryptionService`: AES/GCM/NoPadding, random 12-byte IV, master key-encryption-key from
+  `idtrust.kms.master-key-base64`). `KeyProviderType` reserves `AWS_KMS`, `VAULT`, `HSM` for later
+  epics. `KeyController` exposes create/get/rotate/deactivate/delete
+  (`PLATFORM_ADMIN`/`ORG_ADMIN` only) — signing is intentionally not exposed over REST, only used
+  internally (e.g. by future credential issuance).
+- **DID lifecycle (`did`)**: `Did` entities (`dids` table, tenant-owned, RLS-protected) behind a
+  `DidMethodProvider` abstraction (`method()`, `create`, `resolve`, `update`, `deactivate`).
+  `did:key` (self-certifying, Ed25519, multicodec + base58btc encoding via a hand-written
+  `Base58`/`Ed25519Codec`) and `did:web` (resolves live via HTTPS GET to
+  `/.well-known/did.json`) are both implemented, despite the Master Spec listing `did:web` as
+  "V1" — the AI build instructions and MVP backlog call for both now, so both were built.
+  Rotation semantics differ by method: `did:web` rotates the key in place (same DID, new key,
+  updated DID Document); `did:key` rejects rotation (`INVALID_REQUEST`) since the key **is** the
+  identifier — callers must create a new DID instead. `DidController` exposes
+  create/list/get/rotate/deactivate (`PLATFORM_ADMIN`/`ORG_ADMIN`/`ISSUER`) plus a public,
+  unauthenticated `GET /api/v1/dids/resolve` (DID resolution is not tenant-scoped or gated).
+- **Schema**: `V4__did_kms_core.sql` (`dids`, `keys` tables) + `V5__did_kms_row_level_security.sql`
+  (RLS policies, mirroring the `V3` pattern). `keys.did_id` is a plain UUID column, not a JPA
+  relationship — `did` depends on `kms` in the Gradle graph, never the reverse, so `ManagedKey`
+  cannot reference the `Did` entity type.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02/E03. Treat the first local
+  `./gradlew build`/`test` as the real validation step.
+- `idtrust.kms.master-key-base64` defaults to an insecure all-zero key for local dev only; every
+  non-local environment **must** override it via `KMS_MASTER_KEY_BASE64` (see `.env.example` and
+  `application.yml` comments).
+- Only Ed25519 verification methods are built for DID documents (both `did:key` and `did:web`) —
+  JWK-based verification methods for `SECP256K1`/`RSA_2048` keys aren't specified anywhere yet and
+  were left out as premature scope.
+- `InternalKeyProvider.deactivate`/`delete` are no-ops beyond status transitions (there's no
+  external key material to revoke yet) — meaningful once `AWS_KMS`/`VAULT`/`HSM` providers exist.
 
 ## Prerequisites
 

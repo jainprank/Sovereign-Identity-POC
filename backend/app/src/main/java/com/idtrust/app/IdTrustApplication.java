@@ -3,6 +3,7 @@ package com.idtrust.app;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 /**
@@ -14,12 +15,14 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
  * {@code hedera}), rather than 20+ independent microservices. Services are extracted later only
  * where scale or organizational boundaries justify it.
  *
- * <p>Component/entity/repository scanning is rooted at {@code com.idtrust} so every module is
- * picked up automatically without this class needing to change as modules are implemented.
+ * <p>Component/entity/repository/{@code @ConfigurationProperties} scanning is rooted at
+ * {@code com.idtrust} so every module is picked up automatically without this class needing to
+ * change as modules are implemented.
  */
 @SpringBootApplication(scanBasePackages = "com.idtrust")
 @EntityScan(basePackages = "com.idtrust")
 @EnableJpaRepositories(basePackages = "com.idtrust")
+@ConfigurationPropertiesScan(basePackages = "com.idtrust")
 public class IdTrustApplication {
 
     public static void main(String[] args) {
