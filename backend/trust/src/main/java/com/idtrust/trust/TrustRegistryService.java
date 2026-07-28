@@ -1,7 +1,10 @@
 package com.idtrust.trust;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.idtrust.common.audit.AuditEvent;
 import com.idtrust.common.audit.AuditEventPublisher;
+import com.idtrust.common.hedera.HederaAnchorPublisher;
+import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
@@ -31,8 +34,9 @@ import java.util.stream.Collectors;
  *   <li>FR-TRUST-009/010 (Trust List Import/Export, e.g. bulk-loading an external eIDAS/OpenID
  *       Federation trust list) are V1-priority and out of scope, mirroring E06's precedent of
  *       skipping schema import/export.</li>
- *   <li>FR-TRUST-012 (Hedera Anchoring) is explicitly deferred to E13 (Hedera) per the build
- *       sequence - registering/revoking trust here has no on-chain side effect yet.</li>
+ *   <li>FR-TRUST-012 (Hedera Anchoring): implemented in E13 (Hedera) - every issuer
+ *       registration/status change/revocation is anchored via {@link HederaAnchorPublisher}, see
+ *       {@link #anchorIssuer}.</li>
  * </ul>
  */
 @Service
@@ -41,12 +45,17 @@ public class TrustRegistryService {
     private final TrustRegistryRepository registryRepository;
     private final TrustedIssuerRepository issuerRepository;
     private final AuditEventPublisher auditEventPublisher;
+    private final HederaAnchorPublisher hederaAnchorPublisher;
+    private final ObjectMapper objectMapper;
 
     public TrustRegistryService(TrustRegistryRepository registryRepository, TrustedIssuerRepository issuerRepository,
-                                 AuditEventPublisher auditEventPublisher) {
+                                 AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
+                                 ObjectMapper objectMapper) {
         this.registryRepository = registryRepository;
         this.issuerRepository = issuerRepository;
         this.auditEventPublisher = auditEventPublisher;
+        this.hederaAnchorPublisher = hederaAnchorPublisher;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -100,6 +109,7 @@ public class TrustRegistryService {
         TrustedIssuer issuer = new TrustedIssuer(tenantId, registryId, issuerDid, organization, trustedCredentialTypes);
         issuerRepository.save(issuer);
         audit(tenantId, "TRUSTED_ISSUER_REGISTERED", "TRUSTED_ISSUER", issuer.getId());
+        anchorIssuer(issuer);
         return issuer;
     }
 
@@ -132,6 +142,7 @@ public class TrustRegistryService {
         }
         issuer.updateStatus(status);
         audit(tenantId, "TRUSTED_ISSUER_STATUS_UPDATED", "TRUSTED_ISSUER", issuer.getId());
+        anchorIssuer(issuer);
         return issuer;
     }
 
@@ -140,6 +151,7 @@ public class TrustRegistryService {
         TrustedIssuer issuer = getIssuer(tenantId, registryId, issuerId);
         issuer.revoke();
         audit(tenantId, "TRUSTED_ISSUER_REVOKED", "TRUSTED_ISSUER", issuer.getId());
+        anchorIssuer(issuer);
         return issuer;
     }
 
@@ -187,5 +199,26 @@ public class TrustRegistryService {
                 "SUCCESS",
                 Map.of()
         ));
+    }
+
+    /**
+     * FR-HED-004 (Trust Registry Anchoring) - hashes only {@code issuerDid}/{@code organization}/
+     * {@code trustedCredentialTypes}/{@code status} (never the tenant-internal {@code id}s), never
+     * throws on its own if serialization somehow fails since {@link HederaAnchorPublisher} itself
+     * never throws.
+     */
+    private void anchorIssuer(TrustedIssuer issuer) {
+        try {
+            String content = objectMapper.writeValueAsString(new AnchoredIssuer(
+                    issuer.getIssuerDid(), issuer.getOrganization(), issuer.getTrustedCredentialTypes(),
+                    issuer.getStatus().name()));
+            hederaAnchorPublisher.anchor(HederaAnchorRequest.ofRawContent(
+                    issuer.getTenantId(), "TRUSTED_ISSUER_ANCHORED", "TRUSTED_ISSUER", issuer.getId(), content));
+        } catch (Exception e) {
+            // Never let an anchoring failure affect trust registry mutations themselves.
+        }
+    }
+
+    private record AnchoredIssuer(String issuerDid, String organization, List<String> trustedCredentialTypes, String status) {
     }
 }

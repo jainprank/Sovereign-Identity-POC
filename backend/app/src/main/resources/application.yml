@@ -50,9 +50,9 @@ logging:
   pattern:
     level: "%5p [%X{correlationId}]"
 
-# Placeholders for identity/trust-layer configuration introduced in later epics. Kept here
-# (commented) so the full external configuration surface is visible from E01 onward - see the
-# Architecture & Implementation Baseline, section 19 ("Docker Compose Baseline").
+# Placeholder for identity-layer configuration introduced in a later epic. Kept here (commented)
+# so the full external configuration surface is visible from E01 onward - see the Architecture &
+# Implementation Baseline, section 19 ("Docker Compose Baseline").
 #
 # idtrust:
 #   keycloak:
@@ -60,11 +60,6 @@ logging:
 #     realm: ${KEYCLOAK_REALM:idtrust}
 #     client-id: ${KEYCLOAK_CLIENT_ID:idtrust-app}
 #     client-secret: ${KEYCLOAK_CLIENT_SECRET:}
-#   hedera:
-#     network: ${HEDERA_NETWORK:testnet}
-#     account-id: ${HEDERA_ACCOUNT_ID:}
-#     operator-key: ${HEDERA_OPERATOR_KEY:}
-#     topic-id: ${HEDERA_TOPIC_ID:}
 
 idtrust:
   kms:
@@ -74,3 +69,13 @@ idtrust:
     # KMS_MASTER_KEY_BASE64 with a securely generated 32-byte key, e.g.:
     #   openssl rand -base64 32
     master-key-base64: ${KMS_MASTER_KEY_BASE64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+  hedera:
+    # Disabled by default so identity/credential functionality remains fully operational without a
+    # real Hedera account (see the hedera module's package-info.java and HederaProperties' Javadoc).
+    # Every environment that wants real anchoring must override this via HEDERA_ENABLED=true and
+    # supply real account-id/operator-key/topic-id values.
+    enabled: ${HEDERA_ENABLED:false}
+    network: ${HEDERA_NETWORK:testnet}
+    account-id: ${HEDERA_ACCOUNT_ID:}
+    operator-key: ${HEDERA_OPERATOR_KEY:}
+    topic-id: ${HEDERA_TOPIC_ID:}

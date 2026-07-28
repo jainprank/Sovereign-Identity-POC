@@ -1,4 +1,15 @@
 dependencies {
     implementation project(':common')
     implementation project(':trust')
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Explicit rather than relying on transitivity: HcsHederaAnchorPublisher serializes the HCS
+    // message envelope and HederaAnchorService parses Mirror Node responses with Jackson's
+    // ObjectMapper.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    // The real Hedera Java SDK (FR-HED-004 through 012) - genuine network/gRPC submission to
+    // Hedera Consensus Service when idtrust.hedera.enabled=true, per the master prompt's "do not
+    // create mock functionality where production functionality is required" rule.
+    implementation 'com.hedera.hashgraph:sdk:2.66.0'
 }

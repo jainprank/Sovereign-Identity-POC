@@ -2,6 +2,8 @@ package com.idtrust.credential.issuance;
 
 import com.idtrust.common.audit.AuditEvent;
 import com.idtrust.common.audit.AuditEventPublisher;
+import com.idtrust.common.hedera.HederaAnchorPublisher;
+import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
@@ -48,15 +50,17 @@ public class CredentialIssuanceService {
     private final DidService didService;
     private final KeyService keyService;
     private final AuditEventPublisher auditEventPublisher;
+    private final HederaAnchorPublisher hederaAnchorPublisher;
 
     public CredentialIssuanceService(CredentialRepository credentialRepository, CredentialSchemaService schemaService,
                                       DidService didService, KeyService keyService,
-                                      AuditEventPublisher auditEventPublisher) {
+                                      AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher) {
         this.credentialRepository = credentialRepository;
         this.schemaService = schemaService;
         this.didService = didService;
         this.keyService = keyService;
         this.auditEventPublisher = auditEventPublisher;
+        this.hederaAnchorPublisher = hederaAnchorPublisher;
     }
 
     @Transactional
@@ -94,6 +98,7 @@ public class CredentialIssuanceService {
                 schema.getFormat(), credentialJwt, credentialHash, claims, expiresAt);
         credentialRepository.save(credential);
         audit(tenantId, "CREDENTIAL_ISSUED", credential.getId());
+        anchorCredential(credential);
 
         CredentialOfferGenerator.CredentialOffer offer = CredentialOfferGenerator.generate(issuerDid, credentialId);
         return new IssuedCredential(credential, offer);
@@ -118,6 +123,23 @@ public class CredentialIssuanceService {
                 "SUCCESS",
                 Map.of()
         ));
+    }
+
+    /**
+     * FR-HED-007 (Credential Integrity Hash) - reuses the already-computed {@code credentialHash}
+     * (SHA-256 of the signed JWT, computed by {@code JwtVerifiableCredentialSigner}/{@code
+     * SdJwtVcSigner} at signing time) rather than hashing again, via {@link
+     * HederaAnchorRequest#ofHash}. FR-HED-008 (Timestamp Anchoring) needs no separate
+     * implementation - it is satisfied by the {@code consensusTimestamp} Hedera assigns this anchor.
+     */
+    private void anchorCredential(Credential credential) {
+        try {
+            hederaAnchorPublisher.anchor(HederaAnchorRequest.ofHash(
+                    credential.getTenantId(), "CREDENTIAL_ANCHORED", "CREDENTIAL", credential.getId(),
+                    credential.getCredentialHash()));
+        } catch (Exception e) {
+            // Never let an anchoring failure affect credential issuance itself.
+        }
     }
 
     /** Pairs a newly issued credential with its one-time credential offer (FR-ISS-009/010/011). */

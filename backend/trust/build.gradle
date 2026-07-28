@@ -1,4 +1,7 @@
 dependencies {
     implementation project(':common')
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // Explicit rather than relying on transitivity: TrustRegistryService serializes trusted issuer
+    // content with Jackson's ObjectMapper before hashing it for Hedera anchoring (FR-HED-004).
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
 }

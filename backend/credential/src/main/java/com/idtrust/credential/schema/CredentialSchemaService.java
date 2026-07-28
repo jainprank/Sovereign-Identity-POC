@@ -1,7 +1,10 @@
 package com.idtrust.credential.schema;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.idtrust.common.audit.AuditEvent;
 import com.idtrust.common.audit.AuditEventPublisher;
+import com.idtrust.common.hedera.HederaAnchorPublisher;
+import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
@@ -22,11 +25,16 @@ public class CredentialSchemaService {
 
     private final CredentialSchemaRepository schemaRepository;
     private final AuditEventPublisher auditEventPublisher;
+    private final HederaAnchorPublisher hederaAnchorPublisher;
+    private final ObjectMapper objectMapper;
 
     public CredentialSchemaService(CredentialSchemaRepository schemaRepository,
-                                    AuditEventPublisher auditEventPublisher) {
+                                    AuditEventPublisher auditEventPublisher,
+                                    HederaAnchorPublisher hederaAnchorPublisher, ObjectMapper objectMapper) {
         this.schemaRepository = schemaRepository;
         this.auditEventPublisher = auditEventPublisher;
+        this.hederaAnchorPublisher = hederaAnchorPublisher;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -64,6 +72,7 @@ public class CredentialSchemaService {
         requireDraft(schema);
         schema.publish();
         audit(tenantId, "SCHEMA_PUBLISHED", schema.getId());
+        anchorSchema(schema);
         return schema;
     }
 
@@ -113,5 +122,16 @@ public class CredentialSchemaService {
                 "SUCCESS",
                 Map.of()
         ));
+    }
+
+    /** FR-HED-006 (Schema Hash Anchoring) - hashes the published claim catalogue, matching the Baseline's own example envelope. */
+    private void anchorSchema(CredentialSchema schema) {
+        try {
+            String content = objectMapper.writeValueAsString(schema.getDefinition());
+            hederaAnchorPublisher.anchor(HederaAnchorRequest.ofRawContent(
+                    schema.getTenantId(), "CREDENTIAL_SCHEMA_ANCHORED", "CREDENTIAL_SCHEMA", schema.getId(), content));
+        } catch (Exception e) {
+            // Never let an anchoring failure affect schema publication itself.
+        }
     }
 }

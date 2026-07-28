@@ -1,7 +1,10 @@
 package com.idtrust.did;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.idtrust.common.audit.AuditEvent;
 import com.idtrust.common.audit.AuditEventPublisher;
+import com.idtrust.common.hedera.HederaAnchorPublisher;
+import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
@@ -31,12 +34,17 @@ public class DidService {
     private final DidRepository didRepository;
     private final DidMethodProviderRegistry providerRegistry;
     private final AuditEventPublisher auditEventPublisher;
+    private final HederaAnchorPublisher hederaAnchorPublisher;
+    private final ObjectMapper objectMapper;
 
     public DidService(DidRepository didRepository, DidMethodProviderRegistry providerRegistry,
-                       AuditEventPublisher auditEventPublisher) {
+                       AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
+                       ObjectMapper objectMapper) {
         this.didRepository = didRepository;
         this.providerRegistry = providerRegistry;
         this.auditEventPublisher = auditEventPublisher;
+        this.hederaAnchorPublisher = hederaAnchorPublisher;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -48,6 +56,7 @@ public class DidService {
         Did did = new Did(id, tenantId, method, result.did(), result.document());
         didRepository.save(did);
         audit(tenantId, "DID_CREATED", did.getId());
+        anchorDocument(did);
         return did;
     }
 
@@ -119,5 +128,16 @@ public class DidService {
                 "SUCCESS",
                 Map.of()
         ));
+    }
+
+    /** FR-HED-005 (DID Anchoring) - hashes the DID Document itself, never a private key or raw claim. */
+    private void anchorDocument(Did did) {
+        try {
+            String content = objectMapper.writeValueAsString(did.getDocument());
+            hederaAnchorPublisher.anchor(HederaAnchorRequest.ofRawContent(
+                    did.getTenantId(), "DID_ANCHORED", "DID", did.getId(), content));
+        } catch (Exception e) {
+            // Never let an anchoring failure affect DID creation itself.
+        }
     }
 }

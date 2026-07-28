@@ -57,7 +57,7 @@ Build order agreed 2026-07-28:
 | E10 | OID4VP / Verification | ⚠️ implemented, unverified (no local build yet) |
 | E11 | SD-JWT | ⚠️ implemented, unverified (no local build yet) |
 | E12 | Trust Registry | ⚠️ implemented, unverified (no local build yet) |
-| E13 | Hedera | pending |
+| E13 | Hedera | ⚠️ implemented, unverified (no local build yet) |
 | E14 | Enterprise Integrations | pending |
 | E15 | UI / QA / Security / Production | pending |
 
@@ -555,6 +555,81 @@ now checks dynamically alongside the pre-existing static per-policy allowlist fr
   is picked up in E13 (Hedera).
 - No end-to-end test yet confirms the `hasAnyEntries`-gated fallback actually preserves pre-E12
   verification behavior for a tenant with zero registered issuers.
+
+## E13: Hedera
+
+Implements EPIC 16 (Hedera Integration): FR-HED-001/002/003 (Network/Account/HCS Topic
+Configuration), FR-HED-004 through 008 (Trust Registry/DID/Schema/Credential Anchoring, Timestamp
+Anchoring), FR-HED-009/010 (Transaction Status, Retry Failed Transaction), FR-HED-011 (Async
+Anchoring), FR-HED-012 (Anchoring Verification) and FR-HED-013 (Hedera Health Check) on the
+previously-empty `hedera` module placeholder from E01.
+
+- **`HederaAnchorPublisher`/`HederaAnchorRequest`** (new `common.hedera` package): the interface
+  every domain module calls, mirroring `AuditEventPublisher`'s established
+  interface-in-`common`-plus-single-real-implementation-in-domain-module pattern — the pragmatic
+  substitute for the Baseline's literal Kafka-based async design (section 17), since no message
+  broker exists anywhere in this codebase. `HederaAnchorRequest` carries only a `resourceHash` —
+  never raw content — via two static factories: `ofRawContent(...)` (hashes a raw string with
+  SHA-256) and `ofHash(...)` (accepts an already-computed hash, avoiding double-hashing).
+- **`HcsHederaAnchorPublisher`** (the sole `HederaAnchorPublisher` bean, in `hedera`): a genuine
+  Hedera Java SDK integration (`com.hedera.hashgraph:sdk:2.66.0`), not a mock, per the master
+  prompt's "do not create mock functionality where production functionality is required" rule —
+  gated by `idtrust.hedera.enabled` (default `false`) rather than being fake. When disabled, no
+  network/gRPC call is attempted and a `DISABLED` anchor row is persisted instead, so identity and
+  credential functionality remain fully operational without a real Hedera account. `anchor(...)`
+  never throws: any failure (disabled, unreachable network, bad credentials, SDK error) is captured
+  as a `FAILED` row with a `failureReason` rather than propagating, so callers are never affected by
+  Hedera availability.
+- **`HederaAnchor`** (`hedera_anchors`): one row per anchoring attempt. `AnchorStatus` is
+  `CONFIRMED`/`FAILED`/`DISABLED` — there is no transient PENDING/SUBMITTED state, because the
+  Hedera SDK's `TopicMessageSubmitTransaction.execute(...).getReceipt(...)` call blocks for
+  consensus, so the terminal outcome is already known by the time `anchor(...)` returns. A
+  `CONFIRMED` row's `consensusTimestamp` (Hedera-assigned) satisfies FR-HED-008 (Timestamp
+  Anchoring) without any separate implementation.
+- **On-chain envelope**: `{eventType, resourceType, resourceId, resourceHash, timestamp}`,
+  matching the Baseline's own section 17 example JSON shape — `tenantId` is deliberately excluded
+  from the published message (kept only on the local `hedera_anchors` row for RLS) to keep the
+  on-chain footprint minimal.
+- **Anchored resources** (hash-only, never raw content/PII/keys, per Baseline section 26 Decision
+  4): `TrustRegistryService` hashes `{issuerDid, organization, trustedCredentialTypes, status}`
+  after `registerIssuer`/`updateStatus`/`revokeTrust` (FR-HED-004); `DidService` hashes the DID
+  Document after `create` (FR-HED-005); `CredentialSchemaService` hashes the claim catalogue after
+  `publish` (FR-HED-006); `CredentialIssuanceService` reuses the already-computed
+  `Credential.credentialHash` after `issue`, via `HederaAnchorRequest.ofHash` (FR-HED-007) — no new
+  hashing needed at that call site.
+- **`HederaAnchorService`** (`get`/`listForResource`/`retry`/`verify`) + **`HederaAnchorController`**
+  (`/api/v1/hedera/anchors`): `retry` (FR-HED-010) is only legal from `FAILED`, mirroring
+  `TrustedIssuer.updateStatus`'s guard pattern, and is restricted to `PLATFORM_ADMIN`/`ORG_ADMIN`.
+  `verify` (FR-HED-012) performs a genuine live HTTPS round-trip to the Hedera Mirror Node's public
+  REST API (`https://{network}.mirrornode.hedera.com/api/v1/topics/{topicId}/messages/{sequenceNumber}`),
+  mirroring `did.provider.didweb.DidWebProvider`'s precedent for resolving external state via the
+  JDK's built-in `HttpClient`, and compares the on-chain message's `resourceHash` against the
+  locally stored one. Reads additionally allow `VERIFIER`, matching every other
+  read-vs-mutate RBAC split in this codebase. There is deliberately no anchoring-trigger endpoint —
+  anchors are only ever created as a side effect of `trust`/`did`/`credential` operations.
+- **`HederaHealthIndicator`** (FR-HED-013): a Spring Boot Actuator `HealthIndicator` exposed at
+  `/actuator/health/hedera`. Reports `UP` (not `DOWN`) when `idtrust.hedera.enabled=false` — a
+  disabled Hedera integration is a valid, healthy operating mode for this platform, not an outage —
+  and otherwise performs a lightweight `AccountBalanceQuery` connectivity check.
+- **`idtrust.hedera.*` configuration** (`HederaProperties`): `enabled` (default `false`),
+  `network`/`account-id`/`operator-key`/`topic-id`, overridable via `HEDERA_ENABLED`/
+  `HEDERA_NETWORK`/`HEDERA_ACCOUNT_ID`/`HEDERA_OPERATOR_KEY`/`HEDERA_TOPIC_ID` — mirroring KMS's E05
+  "insecure/inert default, must override via env var for real environments" precedent.
+- **`V18__hedera_anchor_core.sql`/`V19__hedera_anchor_row_level_security.sql`**: the `hedera_anchors`
+  table plus the standard tenant-isolation RLS policy pattern from every prior epic.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E12; the Hedera Java SDK's
+  exact API surface (`Client.forName`, `TopicMessageSubmitTransaction`, `TransactionRecord`, etc.)
+  has not been verified against a real build.
+- FR-HED-014 (Multi-Network Configuration — distinct topics/networks per tenant or ecosystem) is a
+  V2-priority item and out of scope; a single shared topic/network configuration serves every
+  tenant.
+- No integration test exercises a real Hedera testnet account; `idtrust.hedera.enabled=false` by
+  default means the anchoring code paths are entirely untested against a live network.
+- `HederaAnchorController` has no endpoint to list anchors across resource types for a tenant (only
+  per-resource `listForResource`) — acceptable for now since anchors are always looked up starting
+  from a known DID/schema/credential/trusted-issuer.
 
 ## Prerequisites
 
