@@ -11,6 +11,7 @@ import com.idtrust.credential.issuance.CredentialStatus;
 import com.idtrust.credential.issuance.JwtVerifiableCredentialVerifier;
 import com.idtrust.credential.issuance.sdjwt.SdJwtVerifier;
 import com.idtrust.did.DidService;
+import com.idtrust.trust.TrustRegistryService;
 import com.idtrust.verification.oid4vp.Oid4vpRequestGenerator;
 import com.idtrust.verification.policy.PolicyDefinition;
 import com.idtrust.verification.policy.PolicyStatus;
@@ -38,9 +39,18 @@ import java.util.UUID;
  *
  * <p>Deliberate scope decisions:
  * <ul>
- *   <li>FR-VER-012/FR-POL-011 (Verify Trust/Trust Rule) is a static {@code trustedIssuerDids}
- *       allowlist on the policy, not a dynamic Trust Registry lookup - the full Trust Registry
- *       (EPIC 13, FR-TRUST-*) is out of scope until E12 per the build sequence.</li>
+ *   <li>FR-VER-012/FR-POL-011 (Verify Trust/Trust Rule) runs two independent trust checks side by
+ *       side: the pre-existing static {@code trustedIssuerDids} allowlist on the policy ({@code
+ *       trustedIssuer}), and a dynamic Trust Registry lookup (EPIC 13, FR-TRUST-007, {@code
+ *       trustRegistryTrusted}) added in E12 via {@link TrustRegistryService#isTrusted}. The dynamic
+ *       check is only enforced (fail-closed) when {@link TrustRegistryService#hasAnyEntries} is true
+ *       for the verifying tenant - a tenant that has never registered a trusted issuer anywhere
+ *       hasn't adopted the Trust Registry yet, so {@code trustRegistryTrusted} defaults to {@code
+ *       true} for it rather than failing every verification that predates E12. The credential type
+ *       used for the lookup is read directly off the signed artifact ({@code vc.type[1]} for a
+ *       plain JWT-VC, {@code vct} for an SD-JWT VC) rather than fetched from {@code
+ *       CredentialSchema}, since the issuer may belong to a different tenant than the verifier - see
+ *       {@link #decodeCredentialArtifact}.</li>
  *   <li>FR-VER-011 (Verify Status) only works reliably when the credential's issuer belongs to
  *       this verifier's own tenant: {@link CredentialIssuanceService#get} is strictly
  *       tenant-scoped under RLS with no public cross-tenant equivalent to
@@ -74,15 +84,17 @@ public class VerificationService {
     private final VerificationPolicyService policyService;
     private final DidService didService;
     private final CredentialIssuanceService credentialIssuanceService;
+    private final TrustRegistryService trustRegistryService;
     private final AuditEventPublisher auditEventPublisher;
 
     public VerificationService(VerificationRequestRepository requestRepository, VerificationPolicyService policyService,
                                 DidService didService, CredentialIssuanceService credentialIssuanceService,
-                                AuditEventPublisher auditEventPublisher) {
+                                TrustRegistryService trustRegistryService, AuditEventPublisher auditEventPublisher) {
         this.requestRepository = requestRepository;
         this.policyService = policyService;
         this.didService = didService;
         this.credentialIssuanceService = credentialIssuanceService;
+        this.trustRegistryService = trustRegistryService;
         this.auditEventPublisher = auditEventPublisher;
     }
 
@@ -210,6 +222,11 @@ public class VerificationService {
                 || trustedIssuerDids.contains(issuerDid);
         checks.put("trustedIssuer", trustedIssuer);
 
+        UUID tenantId = request.getTenantId();
+        boolean trustRegistryTrusted = !trustRegistryService.hasAnyEntries(tenantId)
+                || trustRegistryService.isTrusted(tenantId, issuerDid, vc.credentialType());
+        checks.put("trustRegistryTrusted", trustRegistryTrusted);
+
         Map<String, Object> credentialSubject = vc.credentialSubject();
         List<String> requiredClaims = rules.requiredClaims();
         boolean requiredClaimsPresent = requiredClaims == null || requiredClaims.isEmpty()
@@ -234,7 +251,7 @@ public class VerificationService {
 
         boolean passed = nonceValid && audienceValid && holderSignatureValid && subjectBindingValid
                 && credentialSignatureValid && vc.disclosureIntegrityValid() && (!rules.requireNotExpired() || notExpired)
-                && trustedIssuer && requiredClaimsPresent && statusOk;
+                && trustedIssuer && trustRegistryTrusted && requiredClaimsPresent && statusOk;
 
         if (!passed) {
             return Result.failure(firstFailureReason(checks));
@@ -267,13 +284,15 @@ public class VerificationService {
             }
             Map<String, Object> payload = parsed.issuerJwt().payload();
             return new CredentialView(parsed.issuerJwt(), (String) payload.get("iss"), (String) payload.get("sub"),
-                    credentialSubject, payload.get("exp"), (String) payload.get("jti"), disclosureIntegrityValid);
+                    credentialSubject, payload.get("exp"), (String) payload.get("jti"), disclosureIntegrityValid,
+                    (String) payload.get("vct"));
         }
 
         JwtVerifiableCredentialVerifier.DecodedJwt vc = JwtVerifiableCredentialVerifier.decode(artifact);
         Map<String, Object> credentialSubject = extractCredentialSubject(vc.payload());
         return new CredentialView(vc, (String) vc.payload().get("iss"), (String) vc.payload().get("sub"),
-                credentialSubject, vc.payload().get("exp"), (String) vc.payload().get("jti"), true);
+                credentialSubject, vc.payload().get("exp"), (String) vc.payload().get("jti"), true,
+                extractCredentialType(vc.payload()));
     }
 
     @SuppressWarnings("unchecked")
@@ -285,10 +304,24 @@ public class VerificationService {
         return Map.of();
     }
 
+    /**
+     * Extracts the schema name embedded in a plain JWT-VC's {@code vc.type} claim (see {@code
+     * JwtVerifiableCredentialSigner}: {@code type = ["VerifiableCredential", schemaName]}) for the
+     * Trust Registry check (FR-TRUST-007) - see {@link #trustRegistryService}'s usage in
+     * {@link #evaluate}.
+     */
+    private String extractCredentialType(Map<String, Object> vcPayload) {
+        Object vcClaim = vcPayload.get("vc");
+        if (vcClaim instanceof Map<?, ?> vcMap && vcMap.get("type") instanceof List<?> types && types.size() > 1) {
+            return String.valueOf(types.get(1));
+        }
+        return null;
+    }
+
     /** A format-agnostic view over either a plain JWT-VC or a parsed SD-JWT VC's issuer JWT. */
     private record CredentialView(JwtVerifiableCredentialVerifier.DecodedJwt signedJwt, String issuerDid,
                                    String subjectDid, Map<String, Object> credentialSubject, Object expClaim,
-                                   String jti, boolean disclosureIntegrityValid) {
+                                   String jti, boolean disclosureIntegrityValid, String credentialType) {
     }
 
     private UUID parseCredentialId(String jti) {

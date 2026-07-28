@@ -56,7 +56,7 @@ Build order agreed 2026-07-28:
 | E09 | OID4VCI / Wallets | ⚠️ implemented, unverified (no local build yet) |
 | E10 | OID4VP / Verification | ⚠️ implemented, unverified (no local build yet) |
 | E11 | SD-JWT | ⚠️ implemented, unverified (no local build yet) |
-| E12 | Trust Registry | pending |
+| E12 | Trust Registry | ⚠️ implemented, unverified (no local build yet) |
 | E13 | Hedera | pending |
 | E14 | Enterprise Integrations | pending |
 | E15 | UI / QA / Security / Production | pending |
@@ -492,6 +492,69 @@ and EPIC 10 (section 15's Signature/Digest/Disclosure verification checks).
 - `sub` is always a plain, visible top-level claim, never itself made selectively disclosable.
 - Only whole-claim disclosure is supported — no support for disclosing individual array elements or
   nested structured claims (SD-JWT VC's recursive/array disclosure forms).
+
+## E12: Trust Registry
+
+Implements EPIC 13 (Trust Registry, FR-TRUST-001 through 011) on the previously-empty `trust`
+module placeholder: a tenant-scoped registry of trusted external issuer DIDs that `verification`
+now checks dynamically alongside the pre-existing static per-policy allowlist from E10.
+
+- **`TrustRegistry`** (`trust_registries`): a named, per-tenant container (Baseline section 7 ERD's
+  `TENANT --< TRUST_REGISTRY`) with a `RegistryStatus` (`ACTIVE`/`INACTIVE`, defaults `ACTIVE`) and
+  a plain free-text `framework` column — a deliberate V1-priority stub for FR-TRUST-008 (Trust
+  Framework), not a dedicated typed entity. Unlike `CredentialSchema`/`VerificationPolicy`, there is
+  no draft/version workflow: FR-TRUST-001 has no publish/freeze acceptance criteria, so a registry is
+  usable for issuer registration immediately upon creation.
+- **`TrustedIssuer`** (`trusted_issuers`): folds FR-TRUST-002 (Register Issuer) and FR-TRUST-003
+  (Register DID) into one entity/one `registerIssuer` call, mirroring E10's precedent of folding
+  FR-ISS-001/002. `issuerDid` is a plain string, not a foreign key into `did.Did` — trust registries
+  exist specifically to declare trust in external issuers this platform never provisioned a DID row
+  for. `trustedCredentialTypes` is a raw `List<String>` JSONB column (`@JdbcTypeCode(SqlTypes.JSON)`
+  directly on the list, a natural extension of the existing JSONB pattern); null/empty means "trusted
+  for every credential type," mirroring `PolicyDefinition.trustedIssuerDids`'s "empty is not
+  fail-closed" precedent. `TrustStatus` is `TRUSTED`/`SUSPENDED` (freely reversible via
+  `updateStatus`, FR-TRUST-004) or terminal `REVOKED` (FR-TRUST-005, mirrors `Credential.revoke`'s
+  "never reverses" precedent — a revoked issuer must be re-registered from scratch).
+- **`TrustRegistryService`**: `create`/`activate`/`deactivate`/`list`/`get` for registries;
+  `registerIssuer` (rejects a non-`ACTIVE` registry and duplicate `issuerDid` within the same
+  registry), `listIssuers`/`getIssuer`/`updateStatus`/`revokeTrust` for issuers; `lookup(tenantId,
+  issuerDid)` (FR-TRUST-006, across every registry a tenant owns); `isTrusted(tenantId, issuerDid,
+  credentialType)` (FR-TRUST-007 — the dynamic Trust Check: at least one `TRUSTED` entry for that DID
+  in an `ACTIVE` registry, whose `trustedCredentialTypes` is empty or contains the presented
+  credential's type); `hasAnyEntries(tenantId)`, which exists purely to support
+  `VerificationService`'s non-breaking integration below. All mutations publish an `AuditEvent`
+  (FR-TRUST-011).
+- **`TrustRegistryController`** (`/api/v1/trust-registries`): mutations (`create`,
+  `activate`/`deactivate`, `registerIssuer`, `updateStatus`, `revoke`) require `PLATFORM_ADMIN` or
+  `ORG_ADMIN` — trust governance is an administrative function per the seeded `ORG_ADMIN` role
+  description. Reads (`list`, `get`, `lookup`, `listIssuers`, `getIssuer`) additionally allow
+  `VERIFIER`, mirroring `credential.schema.CredentialSchemaController`'s established
+  VERIFIER-reads-but-doesn't-mutate precedent from E06. No new `SecurityConfig.permitAll` entries are
+  needed — every Trust Registry endpoint requires authentication.
+- **Dynamic integration into `VerificationService.evaluate`**: a new `trustRegistryTrusted` check
+  runs alongside the pre-existing static `trustedIssuer` allowlist check from E10, and both must pass
+  for verification to succeed. To avoid a breaking regression for every tenant that predates E12 and
+  has never registered a trusted issuer, the dynamic check is only *enforced* when
+  `TrustRegistryService.hasAnyEntries(tenantId)` is true for the verifying tenant; otherwise
+  `trustRegistryTrusted` defaults to `true` and verification falls back to relying solely on the
+  static allowlist, exactly as it did before E12. The credential type passed into `isTrusted` is read
+  directly off the signed artifact rather than fetched from `CredentialSchema` — `vc.type[1]` for a
+  plain JWT-VC (`JwtVerifiableCredentialSigner`'s `type = ["VerifiableCredential", schemaName]`), or
+  the `vct` claim for an SD-JWT VC (E11) — since the credential's issuer may belong to a different
+  tenant than the verifier, the same cross-tenant limitation class documented for FR-VER-011's status
+  check.
+- **`V16__trust_registry_core.sql`/`V17__trust_registry_row_level_security.sql`**: `trust_registries`
+  and `trusted_issuers` tables plus the standard tenant-isolation RLS policy pattern from every prior
+  epic (`V3`/`V5`/`V7`/`V9`/`V11`/`V13`/`V15`). An index on `(tenant_id, issuer_did)` backs both the
+  `lookup` and `isTrusted` query paths.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E11.
+- FR-TRUST-008 (Trust Framework), FR-TRUST-009/010 (Trust List Import/Export), and FR-TRUST-012
+  (Hedera Anchoring) are deferred V1-priority items, per the Baseline's own MVP/V1 split — the latter
+  is picked up in E13 (Hedera).
+- No end-to-end test yet confirms the `hasAnyEntries`-gated fallback actually preserves pre-E12
+  verification behavior for a tenant with zero registered issuers.
 
 ## Prerequisites
 
