@@ -12,6 +12,10 @@ public interface CredentialRepository extends JpaRepository<Credential, UUID> {
 
     Optional<Credential> findByTenantIdAndId(UUID tenantId, UUID id);
 
+    List<Credential> findByTenantId(UUID tenantId);
+
+    List<Credential> findByTenantIdAndSchemaId(UUID tenantId, UUID schemaId);
+
     @Query("""
             SELECT c FROM Credential c
             WHERE c.tenantId = :tenantId

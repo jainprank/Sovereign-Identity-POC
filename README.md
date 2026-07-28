@@ -52,7 +52,7 @@ Build order agreed 2026-07-28:
 | E05 | KMS / Key Lifecycle | ⚠️ implemented, unverified (no local build yet) |
 | E06 | Schemas / Templates | ⚠️ implemented, unverified (no local build yet) |
 | E07 | Credential Issuance | ⚠️ implemented, unverified (no local build yet) |
-| E08 | Status / Revocation | pending |
+| E08 | Status / Revocation | ⚠️ implemented, unverified (no local build yet) |
 | E09 | OID4VCI / Wallets | pending |
 | E10 | OID4VP / Verification | pending |
 | E11 | SD-JWT | pending |
@@ -221,6 +221,65 @@ The `credential` module now implements issuance (EPIC 6, FR-ISS-*):
   pre-authorized-code or authorization-code grant — that protocol lands with E09.
 - No credential-presentation or verification path exists yet (E10); this epic only covers issuance
   and basic tracking.
+
+## E08: Credential Status & Revocation
+
+The `credential` module now implements lifecycle management (EPIC 7, FR-CRED-*):
+
+- **No separate registry resource**: FR-CRED-001 (Credential Registry), FR-CRED-002 (Credential
+  Search) and FR-CRED-003 (Credential Detail) are already satisfied by `CredentialIssuanceService`'s
+  existing `search`/`get` (built in E07) — this epic adds only the status-mutation and
+  status-history capability on top.
+- **Status transitions** (`CredentialLifecycleService`, `credentials` table's existing `status`
+  column): `revoke` (FR-CRED-005, permanent — an `EXPIRED` credential cannot be revoked, an already
+  `REVOKED` one is a no-op error), `suspend` (FR-CRED-006, only from `ISSUED`), `reinstate`
+  (FR-CRED-007, only from `SUSPENDED`, reverses a suspension). `Credential`'s transition methods
+  (`revoke`/`suspend`/`reinstate`/`expire`) are intentionally "dumb" — they perform no legality
+  checks themselves; guarding which transitions are allowed is `CredentialLifecycleService`'s job,
+  matching the `requireDraft`/`requirePublished` pattern already established in
+  `CredentialSchemaService`.
+- **Renewal vs. reissuance** (FR-CRED-009 vs. FR-CRED-010): the Baseline gives both the same generic
+  acceptance-criteria template, so this pass draws a deliberate distinction — `renew` mints a fresh
+  credential with the **same** claims and a new expiry, marking the original `EXPIRED` (superseded,
+  no wrongdoing implied); `reissue` mints a fresh credential with **corrected** claims (and
+  optionally a new expiry), marking the original `REVOKED` (its data is now considered incorrect, so
+  it must not remain usable). A revoked credential cannot be reissued — a new credential must be
+  issued instead.
+- **`claims`** (new `credentials.claims` JSONB column, `V10__credential_status_lifecycle.sql`): a
+  documented extension beyond the Baseline's literal DDL. Renewal and reissuance both need the
+  original claims to re-sign a new credential, and decoding them back out of `credential_jwt` would
+  be a fragile detour around data the platform already had at issuance time.
+- **`CredentialStatusEvent`** (new `credential_status_events` table, tenant-owned, RLS-protected):
+  fulfils the Baseline's section 7 ERD's `CREDENTIAL --< CREDENTIAL_STATUS` one-to-many relationship,
+  which the flat `credentials.status` column (from E07) doesn't itself model. Every transition
+  (including lazy expiration) appends a row with previous/new status and reason — a queryable,
+  domain-typed history distinct from the generic `AuditEvent` audit log, satisfying FR-CRED-013
+  (Lifecycle Audit) more specifically than a generic audit trail would.
+- **Lazy expiration** (FR-CRED-008): applied on read (`effectiveStatus`, used by `checkStatus` and
+  `statusList`) rather than by a background sweep — no scheduled/async infrastructure (Kafka) has
+  been wired up by any epic so far, so a dedicated expiration worker would be premature at this
+  stage.
+- **Status list** (FR-CRED-011, `statusList`): a plain id/status list, optionally filtered by
+  `schemaId`. FR-CRED-012 (Bitstring Status List) is V1-priority and out of scope — it requires
+  implementing the W3C StatusList2021 bitstring-encoded credential format, not just a list.
+- **Status verification** (FR-CRED-014, `checkStatus`): returns the effective status for a single
+  credential, applying lazy expiration first.
+- **`CredentialLifecycleController`** exposes `POST /{id}/revoke`, `/suspend`, `/reinstate`,
+  `/renew`, `/reissue` (`PLATFORM_ADMIN`/`ORG_ADMIN`/`ISSUER`), plus `GET /{id}/status` and
+  `GET /status-list` which additionally allow `VERIFIER` — a verifier needs to check credential
+  status when validating a presentation, so this is exposed ahead of E10 for when that capability is
+  wired up. `GET /{id}/history` returns the raw `CredentialStatusEvent` list.
+- **Schema**: `V10__credential_status_lifecycle.sql` (`credentials.claims`/`status_reason` columns,
+  `credential_status_events` table) + `V11__credential_status_lifecycle_row_level_security.sql`
+  (RLS policy, mirroring the `V3`/`V5`/`V7`/`V9` pattern).
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E07.
+- FR-CRED-012 (Bitstring Status List) is not implemented — `statusList` returns a plain id/status
+  list, not a W3C StatusList2021 bitstring credential.
+- Expiration is lazy/on-read only; a credential past `expiresAt` that is never read (via `checkStatus`,
+  `statusList`, or any other lookup that calls `effectiveStatus`) keeps its stale `ISSUED` status in
+  the database until it is.
 
 ## Prerequisites
 

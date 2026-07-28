@@ -78,7 +78,7 @@ public class CredentialIssuanceService {
                 tenantId, credentialId, issuer, subjectDid, schema.getName(), claims, expiresAt, signingKey, keyService);
 
         Credential credential = new Credential(credentialId, tenantId, schemaId, issuerDid, subjectDid,
-                schema.getFormat(), signed.jwt(), signed.credentialHash(), expiresAt);
+                schema.getFormat(), signed.jwt(), signed.credentialHash(), claims, expiresAt);
         credentialRepository.save(credential);
         audit(tenantId, "CREDENTIAL_ISSUED", credential.getId());
 
