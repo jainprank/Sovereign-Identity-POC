@@ -1,0 +1,12 @@
+# Baseline section 20 - PodDisruptionBudget, so a voluntary disruption (node drain, cluster
+# upgrade) never takes every replica down at once.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: idtrust-backend
+  namespace: idtrust
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: idtrust-backend

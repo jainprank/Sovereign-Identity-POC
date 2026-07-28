@@ -9,6 +9,7 @@ import com.idtrust.credential.issuance.Credential;
 import com.idtrust.credential.issuance.CredentialIssuanceService;
 import com.idtrust.credential.issuance.CredentialRepository;
 import com.idtrust.credential.issuance.CredentialStatus;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,15 +40,17 @@ public class CredentialLifecycleService {
     private final CredentialStatusEventRepository statusEventRepository;
     private final CredentialIssuanceService credentialIssuanceService;
     private final AuditEventPublisher auditEventPublisher;
+    private final MeterRegistry meterRegistry;
 
     public CredentialLifecycleService(CredentialRepository credentialRepository,
                                        CredentialStatusEventRepository statusEventRepository,
                                        CredentialIssuanceService credentialIssuanceService,
-                                       AuditEventPublisher auditEventPublisher) {
+                                       AuditEventPublisher auditEventPublisher, MeterRegistry meterRegistry) {
         this.credentialRepository = credentialRepository;
         this.statusEventRepository = statusEventRepository;
         this.credentialIssuanceService = credentialIssuanceService;
         this.auditEventPublisher = auditEventPublisher;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -164,6 +167,9 @@ public class CredentialLifecycleService {
         credentialRepository.save(credential);
         statusEventRepository.save(new CredentialStatusEvent(tenantId, credential.getId(), previousStatus, newStatus, reason));
         audit(tenantId, auditAction, credential.getId());
+        // FR-ANL-003 (Credential Metrics) - every lifecycle transition (revoke/suspend/reinstate/
+        // renew/reissue) funnels through this single method, mirroring the audit() call above.
+        meterRegistry.counter("idtrust.credentials.transitions", "status", newStatus.name()).increment();
     }
 
     private void audit(UUID tenantId, String action, UUID credentialId) {

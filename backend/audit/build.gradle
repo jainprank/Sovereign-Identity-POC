@@ -1,0 +1,7 @@
+dependencies {
+    implementation project(':common')
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    // AuditRecordDtos.Export writes a CSV response directly with the servlet API; no extra
+    // dependency needed for that, but metadata is persisted as JSON (see AuditRecord.metadata).
+}

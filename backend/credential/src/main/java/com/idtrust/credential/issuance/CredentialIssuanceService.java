@@ -4,6 +4,8 @@ import com.idtrust.common.audit.AuditEvent;
 import com.idtrust.common.audit.AuditEventPublisher;
 import com.idtrust.common.hedera.HederaAnchorPublisher;
 import com.idtrust.common.hedera.HederaAnchorRequest;
+import com.idtrust.common.notification.NotificationEvent;
+import com.idtrust.common.notification.NotificationEventPublisher;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
@@ -18,6 +20,7 @@ import com.idtrust.did.Did;
 import com.idtrust.did.DidService;
 import com.idtrust.kms.key.KeyService;
 import com.idtrust.kms.key.ManagedKey;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,11 +57,15 @@ public class CredentialIssuanceService {
     private final AuditEventPublisher auditEventPublisher;
     private final HederaAnchorPublisher hederaAnchorPublisher;
     private final WebhookEventPublisher webhookEventPublisher;
+    private final NotificationEventPublisher notificationEventPublisher;
+    private final MeterRegistry meterRegistry;
 
     public CredentialIssuanceService(CredentialRepository credentialRepository, CredentialSchemaService schemaService,
                                       DidService didService, KeyService keyService,
                                       AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
-                                      WebhookEventPublisher webhookEventPublisher) {
+                                      WebhookEventPublisher webhookEventPublisher,
+                                      NotificationEventPublisher notificationEventPublisher,
+                                      MeterRegistry meterRegistry) {
         this.credentialRepository = credentialRepository;
         this.schemaService = schemaService;
         this.didService = didService;
@@ -66,6 +73,8 @@ public class CredentialIssuanceService {
         this.auditEventPublisher = auditEventPublisher;
         this.hederaAnchorPublisher = hederaAnchorPublisher;
         this.webhookEventPublisher = webhookEventPublisher;
+        this.notificationEventPublisher = notificationEventPublisher;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -105,6 +114,9 @@ public class CredentialIssuanceService {
         audit(tenantId, "CREDENTIAL_ISSUED", credential.getId());
         anchorCredential(credential);
         publishWebhookEvent(credential, "CredentialIssued");
+        publishNotification(credential);
+        // FR-ANL-001 (Issuance Metrics).
+        meterRegistry.counter("idtrust.credentials.issued", "format", schema.getFormat().name()).increment();
 
         CredentialOfferGenerator.CredentialOffer offer = CredentialOfferGenerator.generate(issuerDid, credentialId);
         return new IssuedCredential(credential, offer);
@@ -159,6 +171,17 @@ public class CredentialIssuanceService {
                     credential.getId(), Map.of("status", credential.getStatus().name())));
         } catch (Exception e) {
             // Never let a webhook delivery failure affect the credential operation itself.
+        }
+    }
+
+    /** EPIC 17 (FR-NOT-003 Issuance Notification) - notifies the issuing tenant's active users. */
+    private void publishNotification(Credential credential) {
+        try {
+            notificationEventPublisher.publish(NotificationEvent.of(credential.getTenantId(), "CredentialIssued",
+                    "CREDENTIAL", credential.getId(),
+                    "A credential was issued to " + credential.getSubjectDid(), Map.of()));
+        } catch (Exception e) {
+            // Never let a notification failure affect the credential operation itself.
         }
     }
 

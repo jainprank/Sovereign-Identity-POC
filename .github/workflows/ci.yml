@@ -28,3 +28,28 @@ jobs:
       # committed before this workflow can run `./gradlew`.
       - name: Build and test
         run: ./gradlew build
+
+  # Master Spec section 35 (CI/CD) - dependency/container vulnerability scanning. Runs against the
+  # filesystem (source + Gradle dependency locks) rather than a built image, since no Dockerfile
+  # exists yet for the app - see the root README's E15 section for that documented gap. Uses
+  # `continue-on-error` so this scan is informational (surfaced in the Security tab) rather than a
+  # merge-blocking gate, until the team decides on a severity threshold policy.
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.24.0
+        continue-on-error: true
+        with:
+          scan-type: fs
+          scan-ref: backend
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif

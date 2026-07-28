@@ -9,6 +9,7 @@ import com.idtrust.credential.issuance.Credential;
 import com.idtrust.credential.issuance.CredentialIssuanceService;
 import com.idtrust.credential.schema.CredentialSchema;
 import com.idtrust.credential.schema.CredentialSchemaService;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,15 +51,17 @@ public class Oid4vciSessionService {
     private final CredentialIssuanceService credentialIssuanceService;
     private final CredentialSchemaService credentialSchemaService;
     private final AuditEventPublisher auditEventPublisher;
+    private final MeterRegistry meterRegistry;
 
     public Oid4vciSessionService(Oid4vciSessionRepository sessionRepository,
                                   CredentialIssuanceService credentialIssuanceService,
                                   CredentialSchemaService credentialSchemaService,
-                                  AuditEventPublisher auditEventPublisher) {
+                                  AuditEventPublisher auditEventPublisher, MeterRegistry meterRegistry) {
         this.sessionRepository = sessionRepository;
         this.credentialIssuanceService = credentialIssuanceService;
         this.credentialSchemaService = credentialSchemaService;
         this.auditEventPublisher = auditEventPublisher;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -98,6 +101,9 @@ public class Oid4vciSessionService {
         Credential credential = credentialIssuanceService.get(tenantId, session.getCredentialId());
         session.claim();
         audit(tenantId, "OID4VCI_CREDENTIAL_CLAIMED", session.getId());
+        // FR-ANL-004 (Wallet Metrics) - a claimed credential is this platform's one genuine
+        // "wallet activity" signal; no wallet UI/session-analytics event exists beyond this.
+        meterRegistry.counter("idtrust.wallet.credentials_claimed").increment();
         return new CredentialResult(credential);
     }
 

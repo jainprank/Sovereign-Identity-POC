@@ -59,7 +59,7 @@ Build order agreed 2026-07-28:
 | E12 | Trust Registry | ⚠️ implemented, unverified (no local build yet) |
 | E13 | Hedera | ⚠️ implemented, unverified (no local build yet) |
 | E14 | Enterprise Integrations | ⚠️ implemented, unverified (no local build yet) |
-| E15 | UI / QA / Security / Production | pending |
+| E15 | UI / QA / Security / Production | ⚠️ implemented, unverified (no local build yet) |
 
 ## E02/E03: IAM, Tenancy, RBAC, Row-Level Security
 
@@ -741,34 +741,193 @@ existed for it in E01, unlike every prior epic).
 - No integration test exercises the new `ApiKeyAuthenticationFilter`/`RateLimitFilter`/webhook HTTP
   delivery path against a real HTTP server.
 
+## E15: UI / QA / Security / Production
+
+This final epic is a synthesis, not a single Baseline EPIC: it maps onto EPIC 15 (Audit &
+Compliance, FR-AUD-001–012), EPIC 17 (Notification, FR-NOT-001–006), EPIC 18 (Analytics &
+Monitoring, FR-ANL-001–008), plus the non-FR-numbered Baseline sections on UI/UX, Security Threat
+Model, Test Catalogue, and Docker/Kubernetes deployment.
+
+- **`audit` module** (new, FR-AUD-009/010): `AuditRecord`/`audit_records` gives the audit trail a
+  durable, queryable store. FR-AUD-001–008 (Authentication/Authorization/DID/Key/Credential/
+  Issuance/Verification/Trust Audit) needed no new code — every prior epic already calls
+  `common.audit.AuditEventPublisher.publish(...)` at its own choke points. `PersistingAuditEventPublisher`
+  (`@Primary`) persists + logs + relays a `AuditEventCreated` webhook, and replaces
+  `LoggingAuditEventPublisher` as the active bean purely via `@ConditionalOnMissingBean` — the
+  exact mechanism `LoggingAuditEventPublisher`'s own pre-existing Javadoc called for, with zero
+  changes to any of the ~25 existing call sites. `AuditController` exposes admin-only search
+  (`GET /api/v1/audit-records`) and CSV export (`GET /api/v1/audit-records/export`, capped at
+  5000 rows).
+- **`notification` module** (new, FR-NOT-001–004): `Notification`/`notifications` (in-app feed) +
+  `EmailNotificationService` (SMTP via `JavaMailSenderImpl`, disabled by default —
+  `idtrust.notification.email.enabled=false`, mirroring Hedera's "disabled is a valid healthy
+  mode" precedent). `NotificationEventPublisherImpl` is the sole `common.notification.
+  NotificationEventPublisher` implementation, wired into `CredentialIssuanceService.issue` and
+  `VerificationService.presentAndVerify`; it notifies every `ACTIVE` user of the tenant (not
+  filtered by RBAC role — a documented scope simplification, see below).
+  `NotificationController` (`/api/v1/notifications`) is self-scoped to the caller, no admin role
+  required. FR-NOT-005 (Webhook Notification) needed no new code — already fully satisfied by
+  E14's `WebhookEventPublisherImpl`, a genuinely different (machine-to-machine) delivery channel
+  from this module's human-facing email/in-app notifications.
+- **Analytics/monitoring (EPIC 18)** via Micrometer/Prometheus, not a bespoke metrics module:
+  `io.micrometer:micrometer-core` added as an `api` dependency on `common` (so every module gets
+  `MeterRegistry` for free) and `micrometer-registry-prometheus` wired once on `app`
+  (`runtimeOnly`), with `management.endpoints.web.exposure.include` extended to
+  `prometheus,metrics`. Instrumented at existing single choke points rather than scattered
+  ad-hoc: `GlobalExceptionHandler` (`idtrust.errors` by error code), `ApiRequestLoggingFilter`
+  (`idtrust.api.requests` timer, FR-ANL-002 API usage), `CredentialIssuanceService.issue`
+  (`idtrust.credentials.issued` by format, FR-ANL-001), `CredentialLifecycleService.transition`
+  (`idtrust.credentials.transitions`, FR-ANL-003), `Oid4vciSessionService.redeemCredential`
+  (`idtrust.wallet.credentials_claimed`, FR-ANL-004), `VerificationService.presentAndVerify`
+  (`idtrust.verifications` by result). FR-ANL-006 (System Health) needed no new code — already
+  satisfied by the pre-existing Actuator health/readiness/liveness probes and
+  `HederaHealthIndicator`.
+- **Security headers** (Baseline section 33 / EPIC 21 threat model): `identity.security.
+  SecurityConfig` now sets `frameOptions().deny()`, a restrictive Content-Security-Policy
+  (`default-src 'none'; frame-ancestors 'none'` — a JSON-only API serves no HTML the browser
+  needs to trust), `NO_REFERRER` referrer-policy, and a locked-down permissions-policy. CSRF stays
+  disabled with an explicit rationale comment: this is a stateless bearer-token-only API with no
+  cookie-based session, so there is no ambient credential a cross-site request could ride on.
+- **CORS** (new, `identity.security.SecurityCorsProperties`, `idtrust.security.cors.
+  allowed-origins`): the `frontend/` scaffold below is served from its own origin
+  (`http://localhost:5173` by default) and calls this API directly, so an explicit allow-list
+  (`Authorization`/`Content-Type`/`X-Tenant-ID` headers) was added — this API had no CORS
+  configuration at all before E15, since every prior caller was either server-to-server or a
+  same-origin admin/test tool.
+- **CI security scanning**: a new `security-scan` job in `.github/workflows/ci.yml` runs
+  `aquasecurity/trivy-action` (filesystem scan) and uploads SARIF results via
+  `github/codeql-action/upload-sarif`. `continue-on-error: true` — informational, not a merge
+  gate, since this pass can't verify Trivy's findings against a real build.
+- **Kubernetes manifests** (new, `infra/k8s/`, Baseline section 20): `namespace.yaml`,
+  `configmap.yaml` (non-secret env), `secret.yaml` (placeholder template — never real values),
+  `deployment.yaml` (2 replicas, resource requests/limits, readiness/liveness probes wired to the
+  existing Actuator endpoints), `service.yaml`, `hpa.yaml` (CPU-based, 2–6 replicas, requires the
+  metrics-server add-on), `pdb.yaml` (`minAvailable: 1`), `networkpolicy.yaml` (default-deny
+  ingress, opened only within the namespace), `ingress.yaml` (TLS via a cert-manager placeholder).
+- **`backend/Dockerfile`** (new): multi-stage build — `eclipse-temurin:21-jdk` runs
+  `./gradlew :app:bootJar --no-daemon`, then `eclipse-temurin:21-jre` runs the jar as a non-root
+  `idtrust` user (uid 1000). Requires the Gradle wrapper to already be committed (see
+  Prerequisites below) — this pass could not generate one.
+- **`infra/docker-compose.yml`**: gained an optional `app` service building from
+  `backend/Dockerfile`, so the full stack (Postgres/Redis/Keycloak/backend) can start with one
+  `docker compose up`; service URLs use Compose network names, matching `infra/k8s/configmap.yaml`'s
+  in-cluster equivalents.
+- **`frontend/`** (new): a React 18 + TypeScript + Vite + Tailwind CSS scaffold — an explicitly
+  scoped **subset** of the Baseline's full 36–48 screen inventory, not the whole thing. Built:
+  Login (Keycloak Authorization Code + PKCE via `react-oidc-context`), Dashboard (unread
+  notification count), DIDs (list + create), Credentials (issue + list, against a chosen
+  published schema), Verification Requests (create an OID4VP request + QR code, list results),
+  Notifications (list + mark read). Every page calls a genuinely existing backend endpoint — no
+  mocked data. There is no "list my tenants" backend endpoint yet, so the Tenant ID (the
+  `X-Tenant-ID` header every tenant-scoped endpoint requires) is entered once by the user and kept
+  in `localStorage` (`src/tenant/TenantContext.tsx`) rather than resolved automatically from the
+  JWT — a documented scope simplification, not an oversight.
+- **MFA**: out of scope for application code. Authentication is entirely delegated to Keycloak
+  (OAuth2 resource server, bearer JWTs only) — MFA is a Keycloak realm-level configuration concern
+  (e.g. enabling an OTP required-action/authentication-flow on the `idtrust` realm), not something
+  this stateless backend or the new frontend scaffold can or should implement itself.
+- **OWASP Top 10 → existing controls** (documented mapping, EPIC 21 threat model):
+  - Injection (SQLi) → JPA/Hibernate parameterized queries everywhere, plus Postgres RLS as a
+    second line of defense (every tenant-scoped table, since E03).
+  - Broken access control → Keycloak-issued JWT + `@PreAuthorize` role checks on every controller,
+    plus `TenantMembershipFilter`'s three-layer tenant isolation (since E02).
+  - Cryptographic failures → KMS envelope encryption for all private key material (`kms.crypto.
+    KeyEncryptionService`, since E05); secrets never committed (`secret.yaml` is a placeholder).
+  - Security misconfiguration / vulnerable components → the new Trivy CI job (this epic).
+  - XSS → this API returns JSON only, never HTML; the new frontend uses React's default
+    escaping and the new `default-src 'none'` CSP.
+  - CSRF → not applicable (documented rationale above: stateless, bearer-token-only, no cookies).
+  - Auth failures → Keycloak handles credential storage/rotation/lockout; this backend never
+    stores a password.
+  - Insufficient logging/monitoring → the new `audit` module (this epic) plus
+    `ApiRequestLog` (E14) plus the new Micrometer instrumentation (this epic).
+  - Server-side request forgery → webhook delivery (E14) targets tenant-configured URLs; no
+    SSRF-specific allow-list exists yet (see limitations below).
+  - Rate limiting/DoS → `apiplatform.ratelimit.RateLimitFilter` (E14), in-memory/per-instance.
+
+**Deliberately deferred (documented, not overlooked):**
+- FR-AUD-011 (Retention Policy) and FR-AUD-012 (Data Deletion) — no automatic audit-record
+  expiry/purge job exists yet; V1-priority per the Baseline.
+- FR-NOT-006 (Notification Preferences) — notifications currently go to every `ACTIVE` tenant
+  user unconditionally; per-user/per-event-type opt-out is the natural extension point once this
+  lands.
+- FR-ANL-005 (Trust Registry Analytics), FR-ANL-007 (Custom Reports), FR-ANL-008 (Dashboard) —
+  the first two need dedicated aggregation queries this pass didn't build, and FR-ANL-008
+  explicitly requires a frontend dashboard beyond this pass's scaffold's plain unread-count tile.
+- The remaining ~30+ screens of the Baseline's UI inventory (org/user/role administration, schema
+  and policy authoring, webhook/API-client management, trust registry administration, Hedera
+  anchoring, an audit-log viewer, credential schema template management, etc.) — this pass
+  wires up the highest-value end-to-end flows (issue → present/verify → get notified), not a
+  full admin console.
+- A dedicated SSRF allow-list for outbound webhook URLs — flagged above, not built.
+- Large-scale automated test authorship: consistent with every prior epic (E02–E14),
+  `IdTrustApplicationTests` remains the only test file in the codebase. The Master Specification's
+  section 36 testing strategy (80%+ coverage target, integration/protocol/E2E test categories,
+  4 named E2E scenarios) is an aspirational target this pass did not attempt to reach, given there
+  is no toolchain available in this environment to write and actually run new tests against.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass — or any prior epic — has been compiled, run, or tested. Same caveat as
+  E02–E14, now compounded by a `frontend/` scaffold whose `npm install`/`npm run build` has
+  likewise never been executed.
+- The Kubernetes manifests have never been applied to a real cluster; `secret.yaml`'s placeholder
+  values must be replaced (or the file regenerated from a real secrets manager) before use, and
+  `hpa.yaml` requires the metrics-server add-on to be installed separately.
+- The Trivy CI job is informational (`continue-on-error: true`), not a merge gate — no vulnerable
+  dependency currently blocks a build.
+- `backend/Dockerfile`'s build stage requires the Gradle wrapper to already be committed to the
+  repo (see the root README's own Prerequisites note) — it is not generated by this pass.
+- The frontend's Tenant ID entry (`localStorage`, no "my tenants" endpoint) is a real UX gap for
+  a user who belongs to more than one tenant or doesn't already know their tenant's UUID.
+- CORS's allow-list currently only covers the Vite dev server origin by default
+  (`CORS_ALLOWED_ORIGINS`) — every deployed environment must override it with the real frontend
+  origin.
+- MFA and the OWASP mapping above are documentation of existing/Keycloak-delegated controls, not
+  new enforcement code — nothing here was penetration-tested.
+
 ## Prerequisites
 
 - Java 21 (e.g. `brew install openjdk@21`)
 - Gradle 8.x, **once**, to generate the wrapper (`brew install gradle`) — after that `./gradlew`
   is self-contained and Gradle doesn't need to stay installed
-- Docker (for Postgres/Redis/Keycloak via Compose)
+- Docker (for Postgres/Redis/Keycloak via Compose, or the full stack including the backend
+  itself — see `infra/docker-compose.yml`'s `app` service, E15)
+- Node.js 20+ and npm, only if running the `frontend/` scaffold (E15)
 
-None of these were available in the environment this scaffold was generated in, so the backend
-has **not been compiled or run yet** — treat first build/test locally as a validation step.
+None of these were available in the environment this scaffold was generated in, so neither the
+backend nor the frontend has **been compiled or run yet** — treat first build/test locally as a
+validation step.
 
 ## Running locally
 
 ```bash
 cp .env.example .env
 
-# start infra
+# start infra (Postgres/Redis/Keycloak)
 docker compose -f infra/docker-compose.yml --env-file .env up -d
 
 # one-time: generate the Gradle wrapper (requires local Gradle 8.x)
 cd backend && gradle wrapper && cd ..
 
-# build & run
+# build & run the backend
 cd backend
 ./gradlew :app:bootRun
 ```
 
 Health check: `curl http://localhost:8080/api/v1/health` and
 `curl http://localhost:8080/actuator/health`.
+
+To run the E15 frontend scaffold against that backend:
+
+```bash
+cd frontend
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Then open `http://localhost:5173` — it redirects to Keycloak for sign-in, then requires a Tenant
+ID (UUID) to be entered once (see this README's E15 section for why).
 
 ## Tests
 

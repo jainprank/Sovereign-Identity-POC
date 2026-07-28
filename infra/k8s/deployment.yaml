@@ -1,0 +1,53 @@
+# Baseline section 20 (Kubernetes Architecture) - the backend/app deployable. Image is built from
+# backend/Dockerfile (`docker build -t idtrust/backend .` from the `backend/` directory); replace
+# `idtrust/backend:latest` with a real registry path once one is pushed to a registry.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idtrust-backend
+  namespace: idtrust
+  labels:
+    app: idtrust-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: idtrust-backend
+  template:
+    metadata:
+      labels:
+        app: idtrust-backend
+    spec:
+      containers:
+        - name: idtrust-backend
+          image: idtrust/backend:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: idtrust-config
+            - secretRef:
+                name: idtrust-secrets
+          # Resource limits (Baseline section 20) - conservative starting point for a single
+          # Spring Boot JVM process; tune against real load-test results before production.
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          # Liveness/readiness probes wired to the readiness/liveness state indicators already
+          # enabled in application.yml (management.health.readinessstate/livenessstate).
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15

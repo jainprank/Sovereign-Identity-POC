@@ -1,0 +1,21 @@
+# Baseline section 20 - Horizontal Pod Autoscaler. Requires the metrics-server add-on in the
+# target cluster (not something this repo installs).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: idtrust-backend
+  namespace: idtrust
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: idtrust-backend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

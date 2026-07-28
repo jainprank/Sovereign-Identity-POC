@@ -2,6 +2,8 @@ package com.idtrust.verification;
 
 import com.idtrust.common.audit.AuditEvent;
 import com.idtrust.common.audit.AuditEventPublisher;
+import com.idtrust.common.notification.NotificationEvent;
+import com.idtrust.common.notification.NotificationEventPublisher;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
@@ -19,6 +21,7 @@ import com.idtrust.verification.policy.PolicyDefinition;
 import com.idtrust.verification.policy.PolicyStatus;
 import com.idtrust.verification.policy.VerificationPolicy;
 import com.idtrust.verification.policy.VerificationPolicyService;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -89,11 +92,14 @@ public class VerificationService {
     private final TrustRegistryService trustRegistryService;
     private final AuditEventPublisher auditEventPublisher;
     private final WebhookEventPublisher webhookEventPublisher;
+    private final NotificationEventPublisher notificationEventPublisher;
+    private final MeterRegistry meterRegistry;
 
     public VerificationService(VerificationRequestRepository requestRepository, VerificationPolicyService policyService,
                                 DidService didService, CredentialIssuanceService credentialIssuanceService,
                                 TrustRegistryService trustRegistryService, AuditEventPublisher auditEventPublisher,
-                                WebhookEventPublisher webhookEventPublisher) {
+                                WebhookEventPublisher webhookEventPublisher,
+                                NotificationEventPublisher notificationEventPublisher, MeterRegistry meterRegistry) {
         this.requestRepository = requestRepository;
         this.policyService = policyService;
         this.didService = didService;
@@ -101,6 +107,8 @@ public class VerificationService {
         this.trustRegistryService = trustRegistryService;
         this.auditEventPublisher = auditEventPublisher;
         this.webhookEventPublisher = webhookEventPublisher;
+        this.notificationEventPublisher = notificationEventPublisher;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -159,6 +167,9 @@ public class VerificationService {
             audit(tenantId, "VERIFICATION_REQUEST_FAILED", request.getId());
         }
         publishWebhookEvent(request);
+        publishNotification(request);
+        // FR-ANL-002 (Verification Metrics).
+        meterRegistry.counter("idtrust.verifications", "result", request.getStatus().name()).increment();
         return request;
     }
 
@@ -381,6 +392,18 @@ public class VerificationService {
                     "VERIFICATION_REQUEST", request.getId(), Map.of("status", request.getStatus().name())));
         } catch (Exception e) {
             // Never let a webhook delivery failure affect the verification result itself.
+        }
+    }
+
+    /** EPIC 17 (FR-NOT-004 Verification Notification) - notifies the verifying tenant's active users. */
+    private void publishNotification(VerificationRequest request) {
+        try {
+            notificationEventPublisher.publish(NotificationEvent.of(request.getTenantId(),
+                    "VerificationCompleted", "VERIFICATION_REQUEST", request.getId(),
+                    "Verification request " + request.getId() + " completed with status " + request.getStatus(),
+                    Map.of()));
+        } catch (Exception e) {
+            // Never let a notification failure affect the verification result itself.
         }
     }
 

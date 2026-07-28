@@ -1,0 +1,21 @@
+# Baseline section 20 / section 21 threat model (tenant data leakage, API abuse) - default-deny
+# ingress, opened only to the ingress controller and same-namespace pods (e.g. for future
+# service-to-service calls); egress left open since this app must reach Postgres, Keycloak, an
+# outbound SMTP host and arbitrary tenant-configured webhook endpoints.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: idtrust-backend
+  namespace: idtrust
+spec:
+  podSelector:
+    matchLabels:
+      app: idtrust-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080

@@ -3,5 +3,11 @@ dependencies {
     api 'org.springframework:spring-webmvc'
     api 'org.springframework.boot:spring-boot-starter-validation'
     api 'jakarta.servlet:jakarta.servlet-api:6.0.0'
+    // EPIC 18 (FR-ANL-*, Analytics & Monitoring) - MeterRegistry is exposed as `api` (not
+    // `implementation`) so every module depending on `common` can inject it directly to record a
+    // Micrometer counter/timer at its own choke points, without each module needing its own
+    // explicit micrometer-core dependency. The concrete registry implementation
+    // (`micrometer-registry-prometheus`) is wired once, at the `app` composition root.
+    api 'io.micrometer:micrometer-core'
     implementation 'org.slf4j:slf4j-api'
 }

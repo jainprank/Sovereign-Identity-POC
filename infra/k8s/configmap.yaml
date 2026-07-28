@@ -1,0 +1,19 @@
+# Non-secret application configuration (Baseline section 19's env var inventory). Secrets
+# (DATABASE_PASSWORD, KMS_MASTER_KEY_BASE64, HEDERA_OPERATOR_KEY, NOTIFICATION_EMAIL_PASSWORD,
+# KEYCLOAK_ADMIN_PASSWORD) live in secret.yaml instead - never in this ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: idtrust-config
+  namespace: idtrust
+data:
+  DATABASE_URL: "jdbc:postgresql://postgres:5432/idtrust"
+  DATABASE_USERNAME: "idtrust"
+  KEYCLOAK_URL: "http://keycloak:8080"
+  KEYCLOAK_REALM: "idtrust"
+  SERVER_PORT: "8080"
+  KMS_PROVIDER: "internal"
+  HEDERA_ENABLED: "false"
+  HEDERA_NETWORK: "testnet"
+  API_RATE_LIMIT_REQUESTS_PER_MINUTE: "120"
+  NOTIFICATION_EMAIL_ENABLED: "false"

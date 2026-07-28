@@ -18,3 +18,5 @@ include 'verification'  // E10 - OID4VP / verification
 include 'trust'         // E12 - Trust registry
 include 'hedera'        // E13 - Hedera trust adapter
 include 'apiplatform'   // E14 - API & developer platform (API keys, OAuth clients, webhooks)
+include 'audit'         // E15 - Audit & Compliance (persisted, queryable, exportable audit trail)
+include 'notification'  // E15 - Notification (email + in-app, issuance/verification events)

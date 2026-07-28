@@ -13,6 +13,11 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 /**
  * Wires the identity module's API into Spring Security's OAuth2 Resource Server support
@@ -31,15 +36,51 @@ import org.springframework.security.web.access.ExceptionTranslationFilter;
 public class SecurityConfig {
 
     @Bean
+    public CorsConfigurationSource corsConfigurationSource(SecurityCorsProperties corsProperties) {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(corsProperties.allowedOrigins());
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        // X-Tenant-ID (three-layer tenant isolation) and Authorization (bearer token) are the two
+        // headers the frontend scaffold under frontend/ needs to send on every authenticated call.
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Tenant-ID"));
+        configuration.setExposedHeaders(List.of("Content-Disposition"));
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, UserRepository userRepository, ObjectMapper objectMapper,
-                                            ApiCredentialAuthenticator apiCredentialAuthenticator)
+                                            ApiCredentialAuthenticator apiCredentialAuthenticator,
+                                            CorsConfigurationSource corsConfigurationSource)
             throws Exception {
         JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
         jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
 
         http
+                // EPIC 21 threat model / Master Spec section 33 (Security Architecture) - CSRF
+                // protection is a cookie-session concern; this API is stateless bearer-token-only
+                // (no cookie is ever set for authentication), so there is no ambient credential a
+                // cross-site request could ride on - disabling is a documented architectural fit,
+                // not a skipped control. See the root README's E15 section.
                 .csrf(csrf -> csrf.disable())
+                // The E15 frontend scaffold (frontend/) is served from its own origin and calls
+                // this API directly with a Keycloak-issued bearer token - see
+                // SecurityCorsProperties' Javadoc for the allow-list this reads from.
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // EPIC 21 threat model (XSS/clickjacking) / Master Spec section 33 - security
+                // response headers applied to every response. Spring Security's own defaults
+                // already cover X-Content-Type-Options and a conservative HSTS; CSP/frame-options/
+                // referrer-policy/permissions-policy are added explicitly since this is a JSON-only
+                // API serving no HTML the browser needs to render trustingly.
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.deny())
+                        .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'none'; frame-ancestors 'none'"))
+                        .referrerPolicy(referrer -> referrer
+                                .policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))
+                        .permissionsPolicy(permissions -> permissions
+                                .policy("geolocation=(), camera=(), microphone=()")))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/health", "/actuator/**").permitAll()
                         .requestMatchers("/api/v1/invitations/accept").permitAll()

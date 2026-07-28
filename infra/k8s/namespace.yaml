@@ -1,0 +1,8 @@
+# IDTrust E15 - Kubernetes Architecture (Baseline section 20). A single namespace for the
+# monolith deployable (backend/app); Baseline's "per-domain namespace" guidance applies once this
+# platform is actually split into separate deployables, which it is not (this is still one Spring
+# Boot process across all Gradle modules) - see the root README's E15 section.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: idtrust

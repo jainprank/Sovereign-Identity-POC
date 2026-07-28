@@ -4,6 +4,7 @@ import com.idtrust.common.webhook.WebhookEvent;
 import com.idtrust.common.webhook.WebhookEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -21,8 +22,15 @@ import java.util.UUID;
  * Skipped for platform-level events with no {@code tenantId} (nothing to look up subscribers
  * against) or a non-UUID {@code resourceId} (e.g. an email address), mirroring
  * {@code webhook.WebhookEventPublisherImpl}'s own "never throw, never block the caller" contract.
+ *
+ * <p>As of E15, {@code audit.PersistingAuditEventPublisher} is exactly the persistent
+ * implementation this Javadoc called for and is always present once the {@code audit} module is
+ * on the classpath (every real deployment, since {@code app} depends on it) - this class now only
+ * activates via {@link ConditionalOnMissingBean} as a fallback for contexts that don't load the
+ * {@code audit} module (e.g. a narrowly-sliced {@code @SpringBootTest}).
  */
 @Component
+@ConditionalOnMissingBean(AuditEventPublisher.class)
 public class LoggingAuditEventPublisher implements AuditEventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger("AUDIT");
