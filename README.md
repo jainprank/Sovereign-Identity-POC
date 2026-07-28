@@ -46,8 +46,8 @@ Build order agreed 2026-07-28:
 | Epic | Scope | Status |
 | --- | --- | --- |
 | E01 | Foundation (this scaffold: repo, Docker Compose, CI, health check, module skeleton) | ✅ done |
-| E02 | IAM / Tenancy / RBAC | pending |
-| E03 | Database / Row-Level Security | pending |
+| E02 | IAM / Tenancy / RBAC | ⚠️ implemented, unverified (no local build yet) |
+| E03 | Database / Row-Level Security | ⚠️ implemented, unverified (no local build yet) |
 | E04 | DID | pending |
 | E05 | KMS / Key Lifecycle | pending |
 | E06 | Schemas / Templates | pending |
@@ -60,6 +60,40 @@ Build order agreed 2026-07-28:
 | E13 | Hedera | pending |
 | E14 | Enterprise Integrations | pending |
 | E15 | UI / QA / Security / Production | pending |
+
+## E02/E03: IAM, Tenancy, RBAC, Row-Level Security
+
+The `identity` module now implements:
+
+- **Organizations & tenants** (platform-administered; `organizations`/`tenants` tables are not
+  tenant-scoped themselves and carry no RLS policy).
+- **Users, roles, permissions, role assignments** (`users`, `roles`, `permissions`,
+  `role_permissions`, `user_roles` — all tenant-owned and RLS-protected, except the global
+  `permissions` catalogue). Seven system roles and an initial permission catalogue are seeded via
+  `V2__identity_core.sql`; tenants can additionally define their own custom roles with a
+  hand-picked subset of permissions (FR-ORG-013).
+- **Invitations** (`invitations` table): `POST /api/v1/invitations` (admin-only, tenant-scoped)
+  and the public `POST /api/v1/invitations/accept` (no auth — the invited party isn't a tenant
+  member yet; the tenant is resolved from the invitation token).
+- **Row-Level Security** (`V3__row_level_security.sql`): `ENABLE`+`FORCE ROW LEVEL SECURITY` on
+  every tenant-owned table, policies keyed on the Postgres session variable `app.tenant_id`. A
+  custom Hibernate `ConnectionProvider` (`TenantConnectionProvider`) sets that session variable on
+  every borrowed connection from `TenantContext` — the same value the API layer already resolved
+  from the `X-Tenant-ID` header — so isolation is enforced redundantly at the API, service, and
+  database layers.
+- **Keycloak-backed JWT auth** (`SecurityConfig`): stateless OAuth2 resource server, realm roles
+  mapped to `ROLE_*` authorities via `KeycloakRealmRoleConverter`. `TenantMembershipFilter` bridges
+  the authenticated JWT subject to a local `AppUser` scoped to the tenant named by
+  `X-Tenant-ID`, rejecting non-members with a 403 in the standard `ApiError` shape.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — the environment used to build it has no local
+  Java/Gradle/Docker toolchain. Treat the first local `./gradlew build`/`test` as the real
+  validation step.
+- Real Keycloak realm/client provisioning and first-login account linkage (beyond invitation
+  acceptance, which does link `keycloak_subject_id`) is out of scope for this pass —
+  `TenantMembershipFilter` resolves users by `keycloak_subject_id` first, falling back to the JWT
+  `email` claim, but does not auto-link on that fallback path.
 
 ## Prerequisites
 

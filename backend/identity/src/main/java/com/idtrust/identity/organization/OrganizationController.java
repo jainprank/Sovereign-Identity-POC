@@ -1,0 +1,58 @@
+package com.idtrust.identity.organization;
+
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
+
+/**
+ * Platform-administration API for organizations. Not tenant-scoped: callers act across the whole
+ * platform, so no {@code X-Tenant-ID} header is required (Master Specification, section 24 "API
+ * Specification", "Identity").
+ */
+@RestController
+@RequestMapping("/api/v1/organizations")
+public class OrganizationController {
+
+    private final OrganizationService organizationService;
+
+    public OrganizationController(OrganizationService organizationService) {
+        this.organizationService = organizationService;
+    }
+
+    @PostMapping
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<OrganizationDtos.Response> create(@Valid @RequestBody OrganizationDtos.CreateRequest request) {
+        Organization organization = organizationService.create(request.name(), request.description(), request.contactEmail());
+        return ResponseEntity.status(HttpStatus.CREATED).body(OrganizationDtos.Response.from(organization));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN')")
+    public OrganizationDtos.Response get(@PathVariable UUID id) {
+        return OrganizationDtos.Response.from(organizationService.get(id));
+    }
+
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN')")
+    public OrganizationDtos.Response update(@PathVariable UUID id, @RequestBody OrganizationDtos.UpdateRequest request) {
+        Organization organization = organizationService.update(
+                id, request.name(), request.description(), request.logoUrl(), request.website(), request.contactEmail());
+        return OrganizationDtos.Response.from(organization);
+    }
+
+    @PostMapping("/{id}/deactivate")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public OrganizationDtos.Response deactivate(@PathVariable UUID id) {
+        return OrganizationDtos.Response.from(organizationService.deactivate(id));
+    }
+}
