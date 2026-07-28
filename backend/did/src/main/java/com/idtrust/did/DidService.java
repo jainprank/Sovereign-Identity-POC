@@ -60,6 +60,18 @@ public class DidService {
         return didRepository.findByTenantId(tenantId);
     }
 
+    /**
+     * Looks up a DID by its string identifier, scoped to a tenant - used by
+     * {@code com.idtrust.credential.issuance.CredentialIssuanceService} to verify that an issuer
+     * DID (FR-ISS-005) is actually owned by the requesting tenant, unlike {@link #resolve} which
+     * deliberately performs no ownership check.
+     */
+    public Did getByDidString(UUID tenantId, String did) {
+        return didRepository.findByTenantIdAndDid(tenantId, did)
+                .orElseThrow(() -> new ApiException(ApiErrorCode.RESOURCE_NOT_FOUND,
+                        "DID not found for this tenant: " + did));
+    }
+
     /** Resolves any DID (not necessarily one this platform manages) - see class Javadoc. */
     public Map<String, Object> resolve(String did) {
         DidMethod method = methodFromIdentifier(did);

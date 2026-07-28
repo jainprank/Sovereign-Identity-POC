@@ -51,7 +51,7 @@ Build order agreed 2026-07-28:
 | E04 | DID | ⚠️ implemented, unverified (no local build yet) |
 | E05 | KMS / Key Lifecycle | ⚠️ implemented, unverified (no local build yet) |
 | E06 | Schemas / Templates | ⚠️ implemented, unverified (no local build yet) |
-| E07 | Credential Issuance | pending |
+| E07 | Credential Issuance | ⚠️ implemented, unverified (no local build yet) |
 | E08 | Status / Revocation | pending |
 | E09 | OID4VCI / Wallets | pending |
 | E10 | OID4VP / Verification | pending |
@@ -163,6 +163,64 @@ The `credential` module now implements schema management (EPIC 5, FR-SCH-*):
 - No claim-validation engine exists yet — `ClaimValidation` rules are stored and round-tripped but
   not enforced anywhere; that lands with credential issuance (E07), which validates claims against
   a schema before signing.
+
+## E07: Credential Issuance
+
+The `credential` module now implements issuance (EPIC 6, FR-ISS-*):
+
+- **No separate "credential definition" resource** — FR-ISS-001 (Create Credential Definition) and
+  FR-ISS-002 (Select Schema) are folded into a single issuance request (`schemaId`, `issuerDid`,
+  `subjectDid`, `claims`, optional `expiresAt`), matching the Baseline's literal DB schema (no
+  `credential_definitions` table) and its `POST /api/v1/credentials` example exactly. The
+  referenced schema must be `PUBLISHED`.
+- **`Credential`** (`credentials` table, tenant-owned, RLS-protected): `id, tenant_id, schema_id,
+  issuer_did, subject_did, format, credential_jwt, credential_hash, status, issued_at, expires_at,
+  created_at, updated_at`. `credential_jwt` and `updated_at` are intentional extensions beyond the
+  Baseline's literal DDL (storing only a hash isn't enough to later deliver or re-verify the
+  credential); `schema_id` is `NOT NULL` here (the Baseline allows it nullable) since claim
+  validation always needs a schema. `CredentialStatus` reserves `SUSPENDED`/`REVOKED`/`EXPIRED` for
+  E08 — only `ISSUED` is reachable from this epic.
+- **Claim validation** (FR-ISS-004, `ClaimValidator`): checks required-claim presence, primitive
+  type matching per `ClaimType`, and any `ClaimValidation` pattern/min/max rules declared on the
+  schema's claims — the enforcement point `CredentialSchema`'s Javadoc said was still missing.
+- **Issuer/subject resolution** (FR-ISS-005/006/007): the issuer DID must belong to the requesting
+  tenant (new `DidService.getByDidString`/`DidRepository.findByTenantIdAndDid`); the subject DID
+  (optional) is resolved via the existing public `DidService.resolve`, which works for any DID the
+  platform doesn't necessarily manage. The issuer's active signing key comes from the existing
+  `KeyService.getActiveKeyForDid`.
+- **JWT-VC signing** (`JwtVerifiableCredentialSigner`): builds a W3C Verifiable Credential as a
+  signed JWT — header `{alg: EdDSA, typ: JWT, kid}` (the `kid` is the issuer DID's
+  `assertionMethod` verification method id, read directly from its stored DID Document rather than
+  re-derived), payload `{iss, sub, iat, exp, jti: urn:uuid:<credentialId>, vc: {...claims}}`.
+  Only Ed25519 issuer keys are supported: the JDK's Ed25519 `Signature` produces a raw signature
+  that's directly JWS-EdDSA-compatible with no DER conversion, unlike ECDSA/RSA — this has no
+  practical impact today since E04 only ever generates Ed25519 DID verification-method keys.
+- **Credential offer / QR / deep link** (FR-ISS-009/010/011, `CredentialOfferGenerator`): a minimal
+  `openid-credential-offer://` URI (forward-compatible scaffolding ahead of E09's full OID4VCI
+  wallet-claim protocol, not yet built) plus a base64-encoded PNG QR code rendered via the newly
+  added ZXing library (`com.google.zxing:core`/`javase` — no QR capability existed anywhere in the
+  codebase, and hand-rolling QR matrix generation was judged out of scope). The offer URI doubles
+  as the deep link, per the Baseline's own single-field response example.
+- **Tracking** (FR-ISS-013, FR-ISS-020): `CredentialController` exposes
+  `POST /api/v1/credentials` (issue), `GET` (search by `subjectDid`/`status`), `GET /{id}`
+  (detail) — `PLATFORM_ADMIN`/`ORG_ADMIN`/`ISSUER` only (no `VERIFIER` read access here, unlike
+  schemas; verifiers work with presented credentials via E10). Every successful issuance publishes
+  a `CREDENTIAL_ISSUED` audit event.
+- **Explicitly out of scope for this pass**: FR-ISS-014 (Cancel Issuance) and FR-ISS-015 (Retry
+  Failed Issuance) — the Baseline's literal API example is synchronous with no pending/claimable
+  offer state to cancel or retry against; building either now would mean inventing an unspecified
+  async state machine that properly belongs with E09. FR-ISS-016 through FR-ISS-019 (Bulk
+  Issuance, Dynamic Claim Population, External Data Source, Credential Preview) are V1-priority and
+  also out of scope.
+- **Schema**: `V8__credential_core.sql` (`credentials` table) +
+  `V9__credential_row_level_security.sql` (RLS policy, mirroring the `V3`/`V5`/`V7` pattern).
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as E02-E06.
+- The credential offer/QR scheme is intentionally minimal scaffolding, not a real OID4VCI
+  pre-authorized-code or authorization-code grant — that protocol lands with E09.
+- No credential-presentation or verification path exists yet (E10); this epic only covers issuance
+  and basic tracking.
 
 ## Prerequisites
 

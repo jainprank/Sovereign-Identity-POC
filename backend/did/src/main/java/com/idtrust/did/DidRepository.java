@@ -13,4 +13,6 @@ public interface DidRepository extends JpaRepository<Did, UUID> {
     Optional<Did> findByTenantIdAndId(UUID tenantId, UUID id);
 
     Optional<Did> findByDid(String did);
+
+    Optional<Did> findByTenantIdAndDid(UUID tenantId, String did);
 }
