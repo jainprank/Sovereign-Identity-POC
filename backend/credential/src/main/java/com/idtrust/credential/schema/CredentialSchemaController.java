@@ -1,7 +1,10 @@
 package com.idtrust.credential.schema;
 
 import com.idtrust.common.tenant.TenantContext;
+import com.idtrust.common.web.ETagSupport;
+import com.idtrust.common.web.PageResponse;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -10,11 +13,11 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -44,25 +47,37 @@ public class CredentialSchemaController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'ISSUER', 'VERIFIER')")
-    public List<CredentialSchemaDtos.Response> search(@RequestParam(required = false) String name,
-                                                        @RequestParam(required = false) SchemaStatus status) {
+    public PageResponse<CredentialSchemaDtos.Response> search(@RequestParam(required = false) String name,
+                                                                 @RequestParam(required = false) SchemaStatus status,
+                                                                 @RequestParam(defaultValue = "0") int page,
+                                                                 @RequestParam(defaultValue = "50") int size) {
         UUID tenantId = TenantContext.requireTenantId();
-        return schemaService.search(tenantId, name, status).stream().map(CredentialSchemaDtos.Response::from).toList();
+        return PageResponse.of(schemaService.search(tenantId, name, status, PageRequest.of(page, Math.min(size, 200))),
+                CredentialSchemaDtos.Response::from);
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'ISSUER', 'VERIFIER')")
-    public CredentialSchemaDtos.Response get(@PathVariable UUID id) {
+    public ResponseEntity<CredentialSchemaDtos.Response> get(@PathVariable UUID id) {
         UUID tenantId = TenantContext.requireTenantId();
-        return CredentialSchemaDtos.Response.from(schemaService.get(tenantId, id));
+        CredentialSchema schema = schemaService.get(tenantId, id);
+        return ResponseEntity.ok()
+                .eTag(ETagSupport.toHeaderValue(schema.getLockVersion()))
+                .body(CredentialSchemaDtos.Response.from(schema));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'ISSUER')")
-    public CredentialSchemaDtos.Response update(@PathVariable UUID id, @RequestBody CredentialSchemaDtos.UpdateRequest request) {
+    public ResponseEntity<CredentialSchemaDtos.Response> update(@PathVariable UUID id,
+                                                                   @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                                                                   @RequestBody CredentialSchemaDtos.UpdateRequest request) {
         UUID tenantId = TenantContext.requireTenantId();
+        ETagSupport.requireMatch(ifMatch, schemaService.get(tenantId, id).getLockVersion());
         SchemaDefinition definition = request.claims() != null ? new SchemaDefinition(request.claims()) : null;
-        return CredentialSchemaDtos.Response.from(schemaService.update(tenantId, id, request.name(), definition));
+        CredentialSchema schema = schemaService.update(tenantId, id, request.name(), definition);
+        return ResponseEntity.ok()
+                .eTag(ETagSupport.toHeaderValue(schema.getLockVersion()))
+                .body(CredentialSchemaDtos.Response.from(schema));
     }
 
     @PostMapping("/{id}/publish")

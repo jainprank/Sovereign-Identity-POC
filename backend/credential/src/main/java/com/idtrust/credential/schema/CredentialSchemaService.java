@@ -8,6 +8,8 @@ import com.idtrust.common.hedera.HederaAnchorRequest;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,6 +56,10 @@ public class CredentialSchemaService {
 
     public List<CredentialSchema> search(UUID tenantId, String name, SchemaStatus status) {
         return schemaRepository.search(tenantId, name, status);
+    }
+
+    public Page<CredentialSchema> search(UUID tenantId, String name, SchemaStatus status, Pageable pageable) {
+        return schemaRepository.search(tenantId, name, status, pageable);
     }
 
     @Transactional

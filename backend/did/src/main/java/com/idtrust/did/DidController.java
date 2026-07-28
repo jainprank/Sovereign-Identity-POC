@@ -1,7 +1,9 @@
 package com.idtrust.did;
 
 import com.idtrust.common.tenant.TenantContext;
+import com.idtrust.common.web.PageResponse;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -12,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -40,8 +41,10 @@ public class DidController {
 
     @GetMapping("/api/v1/dids")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'ISSUER')")
-    public List<DidDtos.Response> list() {
-        return didService.listByTenant(TenantContext.requireTenantId()).stream().map(DidDtos.Response::from).toList();
+    public PageResponse<DidDtos.Response> list(@RequestParam(defaultValue = "0") int page,
+                                                 @RequestParam(defaultValue = "50") int size) {
+        return PageResponse.of(didService.listByTenant(TenantContext.requireTenantId(), PageRequest.of(page, Math.min(size, 200))),
+                DidDtos.Response::from);
     }
 
     @GetMapping("/api/v1/dids/{id}")

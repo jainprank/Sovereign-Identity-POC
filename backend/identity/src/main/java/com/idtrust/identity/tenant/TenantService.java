@@ -8,6 +8,8 @@ import com.idtrust.common.web.ApiException;
 import com.idtrust.identity.organization.Organization;
 import com.idtrust.identity.organization.OrganizationService;
 import com.idtrust.identity.organization.OrganizationStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,6 +54,14 @@ public class TenantService {
 
     public List<Tenant> listByOrganization(UUID organizationId) {
         return tenantRepository.findByOrganizationId(organizationId);
+    }
+
+    public Page<Tenant> listByOrganization(UUID organizationId, Pageable pageable) {
+        return tenantRepository.findByOrganizationId(organizationId, pageable);
+    }
+
+    public Page<Tenant> listAll(Pageable pageable) {
+        return tenantRepository.findAll(pageable);
     }
 
     @Transactional

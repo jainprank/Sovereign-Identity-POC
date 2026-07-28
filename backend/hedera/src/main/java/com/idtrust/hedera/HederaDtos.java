@@ -42,4 +42,22 @@ public final class HederaDtos {
 
     public record VerifyResponse(UUID anchorId, boolean verified) {
     }
+
+    public record NetworkResponse(
+            UUID id,
+            String networkName,
+            String mirrorNodeUrl,
+            String consensusNodeEndpoint,
+            boolean active
+    ) {
+        public static NetworkResponse from(HederaNetwork network) {
+            return new NetworkResponse(
+                    network.getId(),
+                    network.getNetworkName(),
+                    network.getMirrorNodeUrl(),
+                    network.getConsensusNodeEndpoint(),
+                    network.isActive()
+            );
+        }
+    }
 }

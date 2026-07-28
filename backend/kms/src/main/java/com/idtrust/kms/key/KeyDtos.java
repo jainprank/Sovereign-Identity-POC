@@ -15,6 +15,26 @@ public final class KeyDtos {
     public record CreateRequest(@NotNull KeyType keyType, @NotNull KeyAlgorithm algorithm, KeyProviderType provider) {
     }
 
+    public record EventResponse(
+            UUID id,
+            UUID didId,
+            UUID keyId,
+            UUID previousKeyId,
+            DidKeyEventType eventType,
+            Instant occurredAt
+    ) {
+        public static EventResponse from(DidKeyEvent event) {
+            return new EventResponse(
+                    event.getId(),
+                    event.getDidId(),
+                    event.getKeyId(),
+                    event.getPreviousKeyId(),
+                    event.getEventType(),
+                    event.getOccurredAt()
+            );
+        }
+    }
+
     /**
      * Never includes private key material - signing happens in-process via {@link KeyService#sign},
      * not through this API (see {@link com.idtrust.kms.provider.KeyProvider}).

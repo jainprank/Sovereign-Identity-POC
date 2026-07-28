@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -58,5 +59,13 @@ public class KeyController {
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         keyService.delete(TenantContext.requireTenantId(), id);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/api/v1/dids/{didId}/key-events")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN')")
+    public List<KeyDtos.EventResponse> keyEventsForDid(@PathVariable UUID didId) {
+        return keyService.keyEventsForDid(TenantContext.requireTenantId(), didId).stream()
+                .map(KeyDtos.EventResponse::from)
+                .toList();
     }
 }

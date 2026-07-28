@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -35,13 +36,16 @@ public class KeyService {
     private final KeyProviderRegistry providerRegistry;
     private final KmsProperties kmsProperties;
     private final AuditEventPublisher auditEventPublisher;
+    private final DidKeyEventRepository didKeyEventRepository;
 
     public KeyService(ManagedKeyRepository keyRepository, KeyProviderRegistry providerRegistry,
-                       KmsProperties kmsProperties, AuditEventPublisher auditEventPublisher) {
+                       KmsProperties kmsProperties, AuditEventPublisher auditEventPublisher,
+                       DidKeyEventRepository didKeyEventRepository) {
         this.keyRepository = keyRepository;
         this.providerRegistry = providerRegistry;
         this.kmsProperties = kmsProperties;
         this.auditEventPublisher = auditEventPublisher;
+        this.didKeyEventRepository = didKeyEventRepository;
     }
 
     @Transactional
@@ -54,6 +58,7 @@ public class KeyService {
                 Base64.getEncoder().encodeToString(material.publicKey()),
                 material.encryptedPrivateKey(), material.externalKeyId());
         keyRepository.save(key);
+        recordEvent(tenantId, key.getDidId(), key.getId(), null, DidKeyEventType.GENERATED);
         audit(tenantId, "KEY_GENERATED", key.getId());
         return key;
     }
@@ -110,6 +115,7 @@ public class KeyService {
         ManagedKey key = get(tenantId, id);
         providerRegistry.get(key.getProvider()).deactivate(key);
         key.deactivate();
+        recordEvent(tenantId, key.getDidId(), key.getId(), null, DidKeyEventType.DEACTIVATED);
         audit(tenantId, "KEY_DEACTIVATED", key.getId());
         return key;
     }
@@ -121,8 +127,14 @@ public class KeyService {
             throw new ApiException(ApiErrorCode.INVALID_REQUEST, "Deactivate the key before deleting it: " + id);
         }
         providerRegistry.get(key.getProvider()).delete(key);
+        recordEvent(tenantId, key.getDidId(), key.getId(), null, DidKeyEventType.DELETED);
         keyRepository.delete(key);
         audit(tenantId, "KEY_DELETED", id);
+    }
+
+    /** History for the DID currently backed by this key chain, newest first. */
+    public List<DidKeyEvent> keyEventsForDid(UUID tenantId, UUID didId) {
+        return didKeyEventRepository.findByTenantIdAndDidIdOrderByOccurredAtDesc(tenantId, didId);
     }
 
     private ManagedKey rotate(ManagedKey previous) {
@@ -140,8 +152,13 @@ public class KeyService {
         keyRepository.save(next);
 
         previous.markRotated();
+        recordEvent(previous.getTenantId(), previous.getDidId(), next.getId(), previous.getId(), DidKeyEventType.ROTATED);
         audit(previous.getTenantId(), "KEY_ROTATED", next.getId());
         return next;
+    }
+
+    private void recordEvent(UUID tenantId, UUID didId, UUID keyId, UUID previousKeyId, DidKeyEventType eventType) {
+        didKeyEventRepository.save(new DidKeyEvent(tenantId, didId, keyId, previousKeyId, eventType));
     }
 
     private ManagedKey getById(UUID id) {

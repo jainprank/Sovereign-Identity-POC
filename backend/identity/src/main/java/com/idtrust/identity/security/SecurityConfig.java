@@ -2,6 +2,8 @@ package com.idtrust.identity.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.idtrust.common.security.ApiCredentialAuthenticator;
+import com.idtrust.identity.idempotency.IdempotencyFilter;
+import com.idtrust.identity.idempotency.IdempotencyKeyRepository;
 import com.idtrust.identity.user.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -52,7 +54,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, UserRepository userRepository, ObjectMapper objectMapper,
                                             ApiCredentialAuthenticator apiCredentialAuthenticator,
-                                            CorsConfigurationSource corsConfigurationSource)
+                                            CorsConfigurationSource corsConfigurationSource,
+                                            IdempotencyKeyRepository idempotencyKeyRepository)
             throws Exception {
         JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
         jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(new KeycloakRealmRoleConverter());
@@ -100,7 +103,8 @@ public class SecurityConfig {
                         .authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))
                         .accessDeniedHandler(new RestAccessDeniedHandler(objectMapper)))
                 .addFilterBefore(new ApiKeyAuthenticationFilter(apiCredentialAuthenticator), BearerTokenAuthenticationFilter.class)
-                .addFilterAfter(new TenantMembershipFilter(userRepository), ExceptionTranslationFilter.class);
+                .addFilterAfter(new TenantMembershipFilter(userRepository), ExceptionTranslationFilter.class)
+                .addFilterAfter(new IdempotencyFilter(idempotencyKeyRepository, objectMapper), TenantMembershipFilter.class);
 
         return http.build();
     }

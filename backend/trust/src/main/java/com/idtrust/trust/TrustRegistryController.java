@@ -115,6 +115,13 @@ public class TrustRegistryController {
         return TrustDtos.IssuerResponse.from(issuer);
     }
 
+    @GetMapping("/{id}/issuers/{issuerId}/events")
+    @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'VERIFIER')")
+    public List<TrustDtos.EventResponse> entryEvents(@PathVariable UUID id, @PathVariable UUID issuerId) {
+        return trustRegistryService.entryEvents(TenantContext.requireTenantId(), id, issuerId).stream()
+                .map(TrustDtos.EventResponse::from).toList();
+    }
+
     private TrustStatus parseStatus(String status) {
         try {
             return TrustStatus.valueOf(status.toUpperCase());

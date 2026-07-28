@@ -15,6 +15,8 @@ import com.idtrust.did.provider.DidMethod;
 import com.idtrust.did.provider.DidMethodProvider;
 import com.idtrust.did.provider.DidMethodProviderRegistry;
 import com.idtrust.did.provider.DidProviderResult;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -72,6 +74,10 @@ public class DidService {
 
     public List<Did> listByTenant(UUID tenantId) {
         return didRepository.findByTenantId(tenantId);
+    }
+
+    public Page<Did> listByTenant(UUID tenantId, Pageable pageable) {
+        return didRepository.findByTenantId(tenantId, pageable);
     }
 
     /**

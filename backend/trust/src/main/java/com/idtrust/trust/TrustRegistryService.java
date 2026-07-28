@@ -46,16 +46,19 @@ public class TrustRegistryService {
 
     private final TrustRegistryRepository registryRepository;
     private final TrustedIssuerRepository issuerRepository;
+    private final TrustEntryEventRepository entryEventRepository;
     private final AuditEventPublisher auditEventPublisher;
     private final HederaAnchorPublisher hederaAnchorPublisher;
     private final WebhookEventPublisher webhookEventPublisher;
     private final ObjectMapper objectMapper;
 
     public TrustRegistryService(TrustRegistryRepository registryRepository, TrustedIssuerRepository issuerRepository,
-                                 AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
+                                 TrustEntryEventRepository entryEventRepository, AuditEventPublisher auditEventPublisher,
+                                 HederaAnchorPublisher hederaAnchorPublisher,
                                  WebhookEventPublisher webhookEventPublisher, ObjectMapper objectMapper) {
         this.registryRepository = registryRepository;
         this.issuerRepository = issuerRepository;
+        this.entryEventRepository = entryEventRepository;
         this.auditEventPublisher = auditEventPublisher;
         this.hederaAnchorPublisher = hederaAnchorPublisher;
         this.webhookEventPublisher = webhookEventPublisher;
@@ -112,6 +115,7 @@ public class TrustRegistryService {
 
         TrustedIssuer issuer = new TrustedIssuer(tenantId, registryId, issuerDid, organization, trustedCredentialTypes);
         issuerRepository.save(issuer);
+        recordEntryEvent(tenantId, issuer.getId(), null, issuer.getStatus(), "Registered");
         audit(tenantId, "TRUSTED_ISSUER_REGISTERED", "TRUSTED_ISSUER", issuer.getId());
         anchorIssuer(issuer);
         publishWebhookEvent(issuer);
@@ -145,7 +149,9 @@ public class TrustRegistryService {
             throw new ApiException(ApiErrorCode.INVALID_REQUEST,
                     "Use the revoke operation to move a trusted issuer to REVOKED: " + issuerId);
         }
+        TrustStatus previousStatus = issuer.getStatus();
         issuer.updateStatus(status);
+        recordEntryEvent(tenantId, issuer.getId(), previousStatus, issuer.getStatus(), null);
         audit(tenantId, "TRUSTED_ISSUER_STATUS_UPDATED", "TRUSTED_ISSUER", issuer.getId());
         anchorIssuer(issuer);
         publishWebhookEvent(issuer);
@@ -155,11 +161,24 @@ public class TrustRegistryService {
     @Transactional
     public TrustedIssuer revokeTrust(UUID tenantId, UUID registryId, UUID issuerId) {
         TrustedIssuer issuer = getIssuer(tenantId, registryId, issuerId);
+        TrustStatus previousStatus = issuer.getStatus();
         issuer.revoke();
+        recordEntryEvent(tenantId, issuer.getId(), previousStatus, issuer.getStatus(), null);
         audit(tenantId, "TRUSTED_ISSUER_REVOKED", "TRUSTED_ISSUER", issuer.getId());
         anchorIssuer(issuer);
         publishWebhookEvent(issuer);
         return issuer;
+    }
+
+    /** FR-TRUST-011 - append-only trail, distinct from the generic audit log; see {@link TrustEntryEvent}. */
+    public List<TrustEntryEvent> entryEvents(UUID tenantId, UUID registryId, UUID issuerId) {
+        getIssuer(tenantId, registryId, issuerId);
+        return entryEventRepository.findByTenantIdAndTrustedIssuerIdOrderByOccurredAtDesc(tenantId, issuerId);
+    }
+
+    private void recordEntryEvent(UUID tenantId, UUID trustedIssuerId, TrustStatus previousStatus,
+                                   TrustStatus newStatus, String reason) {
+        entryEventRepository.save(new TrustEntryEvent(tenantId, trustedIssuerId, previousStatus, newStatus, reason));
     }
 
     /** FR-TRUST-006 - every entry across every one of this tenant's registries for the given issuer DID. */

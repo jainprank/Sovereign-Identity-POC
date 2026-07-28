@@ -885,6 +885,83 @@ Model, Test Catalogue, and Docker/Kubernetes deployment.
 - MFA and the OWASP mapping above are documentation of existing/Keycloak-delegated controls, not
   new enforcement code — nothing here was penetration-tested.
 
+## Post-E15: API/DB spec reconciliation gap-fill
+
+A follow-up pass, done after all 15 epics above, closing gaps found by diffing the implementation
+against 4 supplied artifact specs (API spec, DB spec, UI spec, AI backlog) rather than against the
+Architecture & Implementation Baseline used for E01–E15. Two categories:
+
+**Cross-cutting API contracts:**
+- **Idempotency-Key** (`identity.idempotency`): `idempotency_keys` (`V26`/`V27`) +
+  `IdempotencyFilter`, a new `OncePerRequestFilter` registered after `TenantMembershipFilter`.
+  Skips non-POST/PUT/PATCH or missing-header/missing-tenant requests; hashes the request body
+  (SHA-256), replays a stored response on an exact hash match, `409`s on a hash mismatch for the
+  same key, otherwise executes the chain and persists the response (status < 500 only) with a
+  24-hour expiry. Only covers tenant-scoped requests — a documented limitation, not an oversight.
+- **ETag / If-Match optimistic concurrency** (`common.web.ETagSupport`, `V28`): a `lockVersion`
+  JPA `@Version` column added to `Organization`, `Tenant`, `CredentialSchema`,
+  `VerificationPolicy` — named `lockVersion` (not `version`) on all 4 for consistency, since
+  `CredentialSchema`/`VerificationPolicy` already have a business-meaning `version` field (schema/
+  policy revision) that a generic optimistic-lock counter would collide with. `GET` returns an
+  `ETag`; `PATCH` requires a matching `If-Match` (new `ApiErrorCode.PRECONDITION_FAILED`, `412`) or
+  none at all (`*`/absent is a no-op check). Not applied to every PATCH endpoint in the codebase —
+  scoped to these 4 resources.
+- **Pagination envelope** (`common.web.PageResponse<T>`): a `{content, page, size, totalElements,
+  totalPages}` wrapper (Spring Data `Page<T>` reused directly, not reinvented) applied to the
+  Organizations/Tenants/Users/DIDs/Credentials/CredentialSchemas list endpoints, alongside their
+  pre-existing unpaginated `List<T>` search methods (kept for internal/service-layer callers).
+
+**Missing tables/entities (8, one per module):**
+- **`service_accounts`** (`identity.serviceaccount`, `V29`/`V30`) — a durable, tenant-owned
+  non-human *identity* record (name/description/status: `ACTIVE`/`SUSPENDED`/`REVOKED`).
+  Deliberately **not** merged with `apiplatform.client.ApiClient` (`api_clients`), which already
+  fully implements machine-identity *authentication credentials* (FR-API-001/002) — a different
+  concept with no FK coupling introduced between the two modules.
+- **`tenant_memberships`** (`identity.membership`, `V31`/`V32`) — a genuinely additive
+  tenant↔user many-to-many (`OWNER`/`ADMIN`/`MEMBER`, `ACTIVE`/`REVOKED`), explicitly **not** wired
+  into `TenantMembershipFilter` (still the sole JWT-tenant-resolution path) or `rbac.UserRole`
+  (still the sole per-tenant RBAC mechanism) — a standalone membership-management API layered on
+  top, not a replacement.
+- **`did_key_events`** (`kms.key`, `V33`/`V34`) — an append-only lifecycle trail (`GENERATED`/
+  `ROTATED`/`DEACTIVATED`/`DELETED`) recorded by `KeyService` at all 4 mutation points, exposed via
+  `GET /api/v1/dids/{didId}/key-events`. Complements (doesn't replace) `ManagedKey
+  .rotatedFromKeyId`'s single-hop pointer.
+- **`credential_templates`** (`credential.template`, `V35`/`V36`) — reusable, tenant-owned
+  issuance presets (default claims + default validity) for a schema, distinct from
+  `CredentialSchema` itself. `CredentialIssuanceService.issueFromTemplate` (`POST /api/v1/
+  credentials/from-template`) merges caller-supplied claim overrides on top of a template's
+  defaults.
+- **`status_lists`** (`credential.statuslist`, `V37`/`V38`) — a real StatusList2021-shaped
+  GZIP+Base64url compressed bitstring (`BitstringCodec`), closing the gap
+  `CredentialLifecycleService`'s own pre-existing Javadoc already documented ("FR-CRED-012 ... out
+  of scope ... plain id/status list, not a bitstring credential"). Scoped to the `REVOCATION`
+  purpose only (suspension stays on the existing reversible status column, a poor fit for a
+  permanent-flag bitstring). Wired into `CredentialIssuanceService.issue` (allocates a bit index
+  per new credential) and `CredentialLifecycleService.revoke` (flips it) — both fire-and-forget,
+  never blocking the credential operation on allocation/bit-flip failure. `GET /api/v1/
+  status-lists?issuerDid=...` is tenant-scoped and authenticated, **not** the unauthenticated,
+  publicly resolvable endpoint the real spec expects verifiers to hit directly — a documented
+  simplification, since introducing this codebase's first unauthenticated resource was out of
+  scope for this pass.
+- **`trust_entry_events`** (`trust`, `V39`/`V40`) — mirrors `did_key_events`: an append-only trail
+  of `TrustedIssuer` status transitions (register/update/revoke), recorded by
+  `TrustRegistryService` alongside its existing audit-event call, exposed via `GET /api/v1/
+  trust-registries/{id}/issuers/{issuerId}/events`.
+- **`hedera_networks`** (`hedera`, `V41`) — a **global** reference catalogue (no `tenant_id`, no
+  RLS, same pattern as `permissions` since E02) of Hedera's named networks and their well-known
+  public mirror-node/JSON-RPC endpoints, seeded with `testnet`/`mainnet` (active) and `previewnet`
+  (inactive). Exposed read-only via `GET /api/v1/hedera/networks`. Does **not** yet drive runtime
+  network *selection* — `HcsHederaAnchorPublisher` still binds to `idtrust.hedera.network` from
+  `HederaProperties` directly; FR-HED-014 (Multi-Network Configuration) remains V1-out-of-scope,
+  this table is groundwork for it, not the full feature.
+
+**Known limitations to verify/build out before production:**
+- Nothing in this pass has been compiled or run — same caveat as every prior epic.
+- Idempotency replay only covers tenant-scoped requests (idempotency_keys is tenant-partitioned).
+- ETag/If-Match is scoped to 4 resources, not every mutable resource in the codebase.
+- `status_lists`' public-resolution endpoint (what a real verifier would fetch, unauthenticated)
+  was not built — see above.
+
 ## Prerequisites
 
 - Java 21 (e.g. `brew install openjdk@21`)

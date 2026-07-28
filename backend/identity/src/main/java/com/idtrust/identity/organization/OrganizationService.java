@@ -5,6 +5,8 @@ import com.idtrust.common.audit.AuditEventPublisher;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +34,10 @@ public class OrganizationService {
         organizationRepository.save(organization);
         audit("ORGANIZATION_CREATED", organization.getId());
         return organization;
+    }
+
+    public Page<Organization> listAll(Pageable pageable) {
+        return organizationRepository.findAll(pageable);
     }
 
     public Organization get(UUID id) {

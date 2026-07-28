@@ -5,6 +5,8 @@ import com.idtrust.common.audit.AuditEventPublisher;
 import com.idtrust.common.tenant.CurrentUserContext;
 import com.idtrust.common.web.ApiErrorCode;
 import com.idtrust.common.web.ApiException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +43,10 @@ public class UserService {
 
     public List<AppUser> listByTenant(UUID tenantId) {
         return userRepository.findByTenantId(tenantId);
+    }
+
+    public Page<AppUser> listByTenant(UUID tenantId, Pageable pageable) {
+        return userRepository.findByTenantId(tenantId, pageable);
     }
 
     public AppUser get(UUID tenantId, UUID id) {

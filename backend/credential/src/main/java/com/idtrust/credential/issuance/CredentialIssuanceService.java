@@ -16,15 +16,23 @@ import com.idtrust.credential.schema.CredentialFormat;
 import com.idtrust.credential.schema.CredentialSchema;
 import com.idtrust.credential.schema.CredentialSchemaService;
 import com.idtrust.credential.schema.SchemaStatus;
+import com.idtrust.credential.statuslist.StatusListPurpose;
+import com.idtrust.credential.statuslist.StatusListService;
+import com.idtrust.credential.template.CredentialTemplate;
+import com.idtrust.credential.template.CredentialTemplateService;
 import com.idtrust.did.Did;
 import com.idtrust.did.DidService;
 import com.idtrust.kms.key.KeyService;
 import com.idtrust.kms.key.ManagedKey;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,13 +67,16 @@ public class CredentialIssuanceService {
     private final WebhookEventPublisher webhookEventPublisher;
     private final NotificationEventPublisher notificationEventPublisher;
     private final MeterRegistry meterRegistry;
+    private final StatusListService statusListService;
+    private final CredentialTemplateService credentialTemplateService;
 
     public CredentialIssuanceService(CredentialRepository credentialRepository, CredentialSchemaService schemaService,
                                       DidService didService, KeyService keyService,
                                       AuditEventPublisher auditEventPublisher, HederaAnchorPublisher hederaAnchorPublisher,
                                       WebhookEventPublisher webhookEventPublisher,
                                       NotificationEventPublisher notificationEventPublisher,
-                                      MeterRegistry meterRegistry) {
+                                      MeterRegistry meterRegistry, StatusListService statusListService,
+                                      CredentialTemplateService credentialTemplateService) {
         this.credentialRepository = credentialRepository;
         this.schemaService = schemaService;
         this.didService = didService;
@@ -75,6 +86,8 @@ public class CredentialIssuanceService {
         this.webhookEventPublisher = webhookEventPublisher;
         this.notificationEventPublisher = notificationEventPublisher;
         this.meterRegistry = meterRegistry;
+        this.statusListService = statusListService;
+        this.credentialTemplateService = credentialTemplateService;
     }
 
     @Transactional
@@ -110,6 +123,7 @@ public class CredentialIssuanceService {
 
         Credential credential = new Credential(credentialId, tenantId, schemaId, issuerDid, subjectDid,
                 schema.getFormat(), credentialJwt, credentialHash, claims, expiresAt);
+        assignStatusListIndex(tenantId, credential);
         credentialRepository.save(credential);
         audit(tenantId, "CREDENTIAL_ISSUED", credential.getId());
         anchorCredential(credential);
@@ -122,6 +136,38 @@ public class CredentialIssuanceService {
         return new IssuedCredential(credential, offer);
     }
 
+    /**
+     * Convenience wrapper over {@link #issue} that seeds claims/expiry from a
+     * {@code CredentialTemplate} (FR-ISS-001/002's reusable-preset gap): {@code claimOverrides} is
+     * merged on top of the template's default claims, and {@code expiresAt} defaults to
+     * {@code now + defaultExpiresInDays} when the caller doesn't supply one explicitly.
+     */
+    @Transactional
+    public IssuedCredential issueFromTemplate(UUID tenantId, UUID templateId, String issuerDid, String subjectDid,
+                                               Map<String, Object> claimOverrides, Instant expiresAt) {
+        CredentialTemplate template = credentialTemplateService.get(tenantId, templateId);
+        Map<String, Object> claims = new HashMap<>(template.getDefaultClaims());
+        if (claimOverrides != null) {
+            claims.putAll(claimOverrides);
+        }
+        Instant resolvedExpiresAt = expiresAt;
+        if (resolvedExpiresAt == null && template.getDefaultExpiresInDays() != null) {
+            resolvedExpiresAt = Instant.now().plus(template.getDefaultExpiresInDays(), ChronoUnit.DAYS);
+        }
+        return issue(tenantId, template.getSchemaId(), issuerDid, subjectDid, claims, resolvedExpiresAt);
+    }
+
+    /** FR-CRED-012 - allocates the credential's revocation-status bit; never blocks issuance on failure. */
+    private void assignStatusListIndex(UUID tenantId, Credential credential) {
+        try {
+            StatusListService.Allocation allocation = statusListService.allocate(
+                    tenantId, credential.getIssuerDid(), StatusListPurpose.REVOCATION);
+            credential.assignStatusList(allocation.statusListId(), allocation.index());
+        } catch (Exception e) {
+            // Never let status-list allocation failure affect credential issuance itself.
+        }
+    }
+
     public Credential get(UUID tenantId, UUID id) {
         return credentialRepository.findByTenantIdAndId(tenantId, id)
                 .orElseThrow(() -> new ApiException(ApiErrorCode.RESOURCE_NOT_FOUND, "Credential not found: " + id));
@@ -129,6 +175,10 @@ public class CredentialIssuanceService {
 
     public List<Credential> search(UUID tenantId, String subjectDid, CredentialStatus status) {
         return credentialRepository.search(tenantId, subjectDid, status);
+    }
+
+    public Page<Credential> search(UUID tenantId, String subjectDid, CredentialStatus status, Pageable pageable) {
+        return credentialRepository.search(tenantId, subjectDid, status, pageable);
     }
 
     private void audit(UUID tenantId, String action, UUID credentialId) {

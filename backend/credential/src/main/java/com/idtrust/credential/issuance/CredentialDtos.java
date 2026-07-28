@@ -22,6 +22,15 @@ public final class CredentialDtos {
     ) {
     }
 
+    public record IssueFromTemplateRequest(
+            @NotNull UUID templateId,
+            @NotNull String issuerDid,
+            String subjectDid,
+            Map<String, Object> claimOverrides,
+            Instant expiresAt
+    ) {
+    }
+
     public record Response(
             UUID id,
             UUID tenantId,
@@ -34,6 +43,8 @@ public final class CredentialDtos {
             Map<String, Object> claims,
             CredentialStatus status,
             String statusReason,
+            UUID statusListId,
+            Integer statusListIndex,
             Instant issuedAt,
             Instant expiresAt,
             Instant createdAt,
@@ -52,6 +63,8 @@ public final class CredentialDtos {
                     credential.getClaims(),
                     credential.getStatus(),
                     credential.getStatusReason(),
+                    credential.getStatusListId(),
+                    credential.getStatusListIndex(),
                     credential.getIssuedAt(),
                     credential.getExpiresAt(),
                     credential.getCreatedAt(),

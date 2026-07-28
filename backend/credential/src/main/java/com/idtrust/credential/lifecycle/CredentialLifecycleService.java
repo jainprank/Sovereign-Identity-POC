@@ -9,6 +9,7 @@ import com.idtrust.credential.issuance.Credential;
 import com.idtrust.credential.issuance.CredentialIssuanceService;
 import com.idtrust.credential.issuance.CredentialRepository;
 import com.idtrust.credential.issuance.CredentialStatus;
+import com.idtrust.credential.statuslist.StatusListService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,16 +42,19 @@ public class CredentialLifecycleService {
     private final CredentialIssuanceService credentialIssuanceService;
     private final AuditEventPublisher auditEventPublisher;
     private final MeterRegistry meterRegistry;
+    private final StatusListService statusListService;
 
     public CredentialLifecycleService(CredentialRepository credentialRepository,
                                        CredentialStatusEventRepository statusEventRepository,
                                        CredentialIssuanceService credentialIssuanceService,
-                                       AuditEventPublisher auditEventPublisher, MeterRegistry meterRegistry) {
+                                       AuditEventPublisher auditEventPublisher, MeterRegistry meterRegistry,
+                                       StatusListService statusListService) {
         this.credentialRepository = credentialRepository;
         this.statusEventRepository = statusEventRepository;
         this.credentialIssuanceService = credentialIssuanceService;
         this.auditEventPublisher = auditEventPublisher;
         this.meterRegistry = meterRegistry;
+        this.statusListService = statusListService;
     }
 
     @Transactional
@@ -63,8 +67,21 @@ public class CredentialLifecycleService {
             throw new ApiException(ApiErrorCode.INVALID_REQUEST, "An expired credential cannot be revoked: " + id);
         }
         transition(tenantId, credential, CredentialStatus.REVOKED, reason, credential::revoke, "CREDENTIAL_REVOKED");
+        setRevocationBit(tenantId, credential);
         credentialIssuanceService.publishWebhookEvent(credential, "CredentialRevoked");
         return credential;
+    }
+
+    /** FR-CRED-012 - flips this credential's bit in its status list, if one was allocated at issuance. */
+    private void setRevocationBit(UUID tenantId, Credential credential) {
+        if (credential.getStatusListId() == null) {
+            return;
+        }
+        try {
+            statusListService.setBit(tenantId, credential.getStatusListId(), credential.getStatusListIndex(), true);
+        } catch (Exception e) {
+            // Never let status-list update failure affect the revocation itself.
+        }
     }
 
     @Transactional

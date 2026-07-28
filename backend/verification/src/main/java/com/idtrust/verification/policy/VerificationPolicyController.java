@@ -1,6 +1,7 @@
 package com.idtrust.verification.policy;
 
 import com.idtrust.common.tenant.TenantContext;
+import com.idtrust.common.web.ETagSupport;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -50,17 +52,26 @@ public class VerificationPolicyController {
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'VERIFIER')")
-    public PolicyDtos.Response get(@PathVariable UUID id) {
+    public ResponseEntity<PolicyDtos.Response> get(@PathVariable UUID id) {
         UUID tenantId = TenantContext.requireTenantId();
-        return PolicyDtos.Response.from(policyService.get(tenantId, id));
+        VerificationPolicy policy = policyService.get(tenantId, id);
+        return ResponseEntity.ok()
+                .eTag(ETagSupport.toHeaderValue(policy.getLockVersion()))
+                .body(PolicyDtos.Response.from(policy));
     }
 
     @PatchMapping("/{id}")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN', 'VERIFIER')")
-    public PolicyDtos.Response update(@PathVariable UUID id, @RequestBody PolicyDtos.UpdateRequest request) {
+    public ResponseEntity<PolicyDtos.Response> update(@PathVariable UUID id,
+                                                         @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                                                         @RequestBody PolicyDtos.UpdateRequest request) {
         UUID tenantId = TenantContext.requireTenantId();
+        ETagSupport.requireMatch(ifMatch, policyService.get(tenantId, id).getLockVersion());
         PolicyDefinition definition = request.rules() != null ? request.rules().toDefinition() : null;
-        return PolicyDtos.Response.from(policyService.update(tenantId, id, definition));
+        VerificationPolicy policy = policyService.update(tenantId, id, definition);
+        return ResponseEntity.ok()
+                .eTag(ETagSupport.toHeaderValue(policy.getLockVersion()))
+                .body(PolicyDtos.Response.from(policy));
     }
 
     @PostMapping("/{id}/activate")

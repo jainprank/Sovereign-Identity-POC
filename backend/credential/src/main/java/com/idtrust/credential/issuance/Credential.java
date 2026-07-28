@@ -76,6 +76,17 @@ public class Credential {
     @Column(name = "status_reason")
     private String statusReason;
 
+    /**
+     * Assigned lazily by {@code CredentialIssuanceService#issue} via {@code StatusListService} - see
+     * {@code V37__status_lists_core.sql}. Null for credentials issued before this feature existed or
+     * for purposes other than REVOCATION (only purpose implemented so far).
+     */
+    @Column(name = "status_list_id")
+    private UUID statusListId;
+
+    @Column(name = "status_list_index")
+    private Integer statusListIndex;
+
     @Column(name = "issued_at", nullable = false)
     private Instant issuedAt;
 
@@ -110,6 +121,12 @@ public class Credential {
         this.issuedAt = now;
         this.createdAt = now;
         this.updatedAt = now;
+    }
+
+    /** Called once, immediately after issuance, when a status-list index has been allocated. */
+    public void assignStatusList(UUID statusListId, int statusListIndex) {
+        this.statusListId = statusListId;
+        this.statusListIndex = statusListIndex;
     }
 
     /** FR-CRED-005 - permanent; a revoked credential can never return to any other status. */
@@ -178,6 +195,14 @@ public class Credential {
 
     public String getStatusReason() {
         return statusReason;
+    }
+
+    public UUID getStatusListId() {
+        return statusListId;
+    }
+
+    public Integer getStatusListIndex() {
+        return statusListIndex;
     }
 
     public CredentialStatus getStatus() {

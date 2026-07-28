@@ -43,6 +43,26 @@ public final class TrustDtos {
         }
     }
 
+    public record EventResponse(
+            UUID id,
+            UUID trustedIssuerId,
+            String previousStatus,
+            String newStatus,
+            String reason,
+            Instant occurredAt
+    ) {
+        public static EventResponse from(TrustEntryEvent event) {
+            return new EventResponse(
+                    event.getId(),
+                    event.getTrustedIssuerId(),
+                    event.getPreviousStatus(),
+                    event.getNewStatus(),
+                    event.getReason(),
+                    event.getOccurredAt()
+            );
+        }
+    }
+
     public record IssuerResponse(
             UUID id,
             UUID tenantId,

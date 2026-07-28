@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -43,6 +44,10 @@ public class Organization {
 
     @Column(nullable = false)
     private Instant updatedAt;
+
+    @Version
+    @Column(name = "lock_version", nullable = false)
+    private long lockVersion;
 
     protected Organization() {
         // JPA
@@ -117,5 +122,9 @@ public class Organization {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public long getLockVersion() {
+        return lockVersion;
     }
 }

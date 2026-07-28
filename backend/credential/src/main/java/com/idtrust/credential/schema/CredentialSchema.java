@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -51,6 +52,10 @@ public class CredentialSchema {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    @Version
+    @Column(name = "lock_version", nullable = false)
+    private long lockVersion;
 
     protected CredentialSchema() {
         // JPA
@@ -128,5 +133,9 @@ public class CredentialSchema {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public long getLockVersion() {
+        return lockVersion;
     }
 }

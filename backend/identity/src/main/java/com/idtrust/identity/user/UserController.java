@@ -1,14 +1,16 @@
 package com.idtrust.identity.user;
 
 import com.idtrust.common.tenant.TenantContext;
+import com.idtrust.common.web.PageResponse;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -28,8 +30,10 @@ public class UserController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ORG_ADMIN')")
-    public List<UserDtos.Response> list() {
-        return userService.listByTenant(TenantContext.requireTenantId()).stream().map(UserDtos.Response::from).toList();
+    public PageResponse<UserDtos.Response> list(@RequestParam(defaultValue = "0") int page,
+                                                  @RequestParam(defaultValue = "50") int size) {
+        return PageResponse.of(userService.listByTenant(TenantContext.requireTenantId(), PageRequest.of(page, Math.min(size, 200))),
+                UserDtos.Response::from);
     }
 
     @GetMapping("/{id}")

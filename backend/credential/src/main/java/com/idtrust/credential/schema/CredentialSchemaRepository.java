@@ -1,5 +1,7 @@
 package com.idtrust.credential.schema;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -19,4 +21,13 @@ public interface CredentialSchemaRepository extends JpaRepository<CredentialSche
             + "AND (:status IS NULL OR s.status = :status)")
     List<CredentialSchema> search(@Param("tenantId") UUID tenantId, @Param("name") String name,
                                    @Param("status") SchemaStatus status);
+
+    @Query(value = "SELECT s FROM CredentialSchema s WHERE s.tenantId = :tenantId "
+            + "AND (:name IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :name, '%'))) "
+            + "AND (:status IS NULL OR s.status = :status)",
+            countQuery = "SELECT COUNT(s) FROM CredentialSchema s WHERE s.tenantId = :tenantId "
+            + "AND (:name IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :name, '%'))) "
+            + "AND (:status IS NULL OR s.status = :status)")
+    Page<CredentialSchema> search(@Param("tenantId") UUID tenantId, @Param("name") String name,
+                                   @Param("status") SchemaStatus status, Pageable pageable);
 }
