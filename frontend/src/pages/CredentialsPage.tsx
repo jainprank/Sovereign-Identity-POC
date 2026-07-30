@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { createApiClient } from "../lib/api";
 import { useTenant } from "../tenant/TenantContext";
+import type { PageResponse } from "../lib/pageResponse";
 
 interface SchemaResponse {
   id: string;
@@ -32,8 +33,14 @@ export function CredentialsPage() {
 
   function load() {
     if (!tenantId) return;
-    client.get<SchemaResponse[]>("/api/v1/credential-schemas").then((r) => setSchemas(r.data)).catch(() => {});
-    client.get<CredentialResponse[]>("/api/v1/credentials").then((r) => setCredentials(r.data)).catch(() => {});
+    client
+      .get<PageResponse<SchemaResponse>>("/api/v1/credential-schemas")
+      .then((r) => setSchemas(r.data.content))
+      .catch(() => {});
+    client
+      .get<PageResponse<CredentialResponse>>("/api/v1/credentials")
+      .then((r) => setCredentials(r.data.content))
+      .catch(() => {});
   }
 
   useEffect(load, [tenantId]);

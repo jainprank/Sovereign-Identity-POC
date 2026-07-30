@@ -83,8 +83,12 @@ public class AuditController {
     private java.util.stream.Stream<AuditRecord> doSearch(String action, String resourceType, UUID actorUserId,
                                                             Instant from, Instant to, int page, int size) {
         PageRequest pageRequest = PageRequest.of(page, Math.min(Math.max(size, 1), 5000), Sort.by("occurredAt").descending());
+        // AuditRecordRepository.search requires non-null from/to (see its Javadoc for why) - an
+        // omitted filter is represented as the full-range sentinel rather than null.
+        Instant effectiveFrom = from != null ? from : Instant.EPOCH;
+        Instant effectiveTo = to != null ? to : Instant.parse("9999-12-31T23:59:59Z");
         return auditRecordRepository.search(TenantContext.requireTenantId(), action, resourceType, actorUserId,
-                from, to, pageRequest).stream();
+                effectiveFrom, effectiveTo, pageRequest).stream();
     }
 
     private String csvField(Object value) {

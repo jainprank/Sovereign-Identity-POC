@@ -14,8 +14,10 @@ public interface VerificationPolicyRepository extends JpaRepository<Verification
 
     Optional<VerificationPolicy> findByTenantIdAndNameAndVersion(UUID tenantId, String name, int version);
 
+    // CAST(:name AS string) works around a Postgres/pgjdbc parameter-type-inference failure
+    // ("function lower(bytea) does not exist") - see CredentialSchemaRepository's identical fix.
     @Query("SELECT p FROM VerificationPolicy p WHERE p.tenantId = :tenantId "
-            + "AND (:name IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :name, '%'))) "
+            + "AND (CAST(:name AS string) IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', CAST(:name AS string), '%'))) "
             + "AND (:status IS NULL OR p.status = :status)")
     List<VerificationPolicy> search(@Param("tenantId") UUID tenantId, @Param("name") String name,
                                      @Param("status") PolicyStatus status);

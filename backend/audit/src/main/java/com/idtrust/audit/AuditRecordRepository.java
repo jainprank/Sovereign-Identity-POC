@@ -17,6 +17,17 @@ public interface AuditRecordRepository extends JpaRepository<AuditRecord, UUID> 
      * {@link com.idtrust.common.tenant.TenantContext#requireTenantId()}) in addition to being
      * enforced by row-level security ({@code V23__audit_row_level_security.sql}) - defense in
      * depth, matching every other tenant-scoped repository in this codebase.
+     *
+     * <p>{@code from}/{@code to} are always non-null by the time they reach this query (see
+     * {@link AuditController#doSearch}, which substitutes sentinel min/max instants when the
+     * caller omits them). Hibernate/pgjdbc cannot reliably infer the Postgres parameter type for a
+     * {@code java.time.Instant} bound only through an {@code IS NULL} check with no other type
+     * context in the same prepared statement - even an explicit {@code CAST(:from AS timestamp)}
+     * fails ("cannot cast type bytea to timestamp without time zone"), unlike the analogous
+     * {@code CAST(:name AS string)} workaround used for optional String filters elsewhere in this
+     * codebase. Always comparing against a real instant (never null) sidesteps the bug entirely,
+     * since a direct comparison against the typed {@code occurredAt} column gives Postgres all the
+     * context it needs.
      */
     @Query("""
             SELECT a FROM AuditRecord a
@@ -24,8 +35,8 @@ public interface AuditRecordRepository extends JpaRepository<AuditRecord, UUID> 
             AND (:action IS NULL OR a.action = :action)
             AND (:resourceType IS NULL OR a.resourceType = :resourceType)
             AND (:actorUserId IS NULL OR a.actorUserId = :actorUserId)
-            AND (:from IS NULL OR a.occurredAt >= :from)
-            AND (:to IS NULL OR a.occurredAt <= :to)
+            AND a.occurredAt >= :from
+            AND a.occurredAt <= :to
             ORDER BY a.occurredAt DESC
             """)
     Page<AuditRecord> search(@Param("tenantId") UUID tenantId, @Param("action") String action,

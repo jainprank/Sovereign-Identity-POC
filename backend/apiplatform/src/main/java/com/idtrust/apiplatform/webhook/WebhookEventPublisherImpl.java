@@ -89,7 +89,7 @@ public class WebhookEventPublisherImpl implements WebhookEventPublisher {
                     .header(SIGNATURE_HEADER, signature)
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 delivery.recordAttempt(true, null);
             } else {

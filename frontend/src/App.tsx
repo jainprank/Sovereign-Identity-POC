@@ -8,14 +8,25 @@ import { DidsPage } from "./pages/DidsPage";
 import { CredentialsPage } from "./pages/CredentialsPage";
 import { VerificationsPage } from "./pages/VerificationsPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { OrganizationsPage } from "./pages/OrganizationsPage";
+import { TenantsPage } from "./pages/TenantsPage";
+import { UsersPage } from "./pages/UsersPage";
+import { InvitationsPage } from "./pages/InvitationsPage";
+import { RolesPage } from "./pages/RolesPage";
+import { ApiClientsPage } from "./pages/ApiClientsPage";
+import { WebhooksPage } from "./pages/WebhooksPage";
+import { ApiLogsPage } from "./pages/ApiLogsPage";
+import { SchemasPage } from "./pages/SchemasPage";
+import { TemplatesPage } from "./pages/TemplatesPage";
+import { PoliciesPage } from "./pages/PoliciesPage";
+import { TrustRegistryPage } from "./pages/TrustRegistryPage";
+import { AuditLogPage } from "./pages/AuditLogPage";
 
 /**
- * E15 UI scaffold - an explicitly-scoped subset of the Baseline's full 36-48 screen inventory
- * (Login, Dashboard, DIDs, Credential issuance, Verification requests, Notifications); every
- * other screen (org/user/role administration, schema/policy authoring, webhook/API-client
- * management, trust registry, Hedera anchoring, audit log viewer, etc.) is deferred - see the
- * root README's E15 section for the full "out of scope for this pass" list. Each page here calls
- * a genuinely existing backend endpoint (no mocked data).
+ * E15 UI scaffold plus the post-E15 admin-console build-out: every route here calls a genuinely
+ * existing backend endpoint (no mocked data). Still an explicitly-scoped subset of the Baseline's
+ * full 36-48 screen inventory (e.g. no Hedera anchoring detail view, no K8s ops console) - see the
+ * root README's E15 section for what remains deferred.
  */
 export function App() {
   const auth = useAuth();
@@ -41,6 +52,19 @@ export function App() {
         <Route path="credentials" element={<CredentialsPage />} />
         <Route path="verifications" element={<VerificationsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="organizations" element={<OrganizationsPage />} />
+        <Route path="tenants" element={<TenantsPage />} />
+        <Route path="users" element={<UsersPage />} />
+        <Route path="invitations" element={<InvitationsPage />} />
+        <Route path="roles" element={<RolesPage />} />
+        <Route path="api-clients" element={<ApiClientsPage />} />
+        <Route path="webhooks" element={<WebhooksPage />} />
+        <Route path="api-logs" element={<ApiLogsPage />} />
+        <Route path="schemas" element={<SchemasPage />} />
+        <Route path="templates" element={<TemplatesPage />} />
+        <Route path="policies" element={<PoliciesPage />} />
+        <Route path="trust-registry" element={<TrustRegistryPage />} />
+        <Route path="audit-log" element={<AuditLogPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

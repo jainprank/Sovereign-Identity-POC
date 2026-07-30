@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { createApiClient } from "../lib/api";
 import { useTenant } from "../tenant/TenantContext";
+import type { PageResponse } from "../lib/pageResponse";
 
 interface DidResponse {
   id: string;
@@ -26,8 +27,8 @@ export function DidsPage() {
   function load() {
     if (!tenantId) return;
     client
-      .get<DidResponse[]>("/api/v1/dids")
-      .then((response) => setDids(response.data))
+      .get<PageResponse<DidResponse>>("/api/v1/dids")
+      .then((response) => setDids(response.data.content))
       .catch(() => setError("Could not load DIDs."));
   }
 

@@ -39,12 +39,14 @@ public class RoleService {
     }
 
     /** System (global) roles plus the tenant's own custom roles. */
+    @Transactional(readOnly = true)
     public List<Role> listAvailable(UUID tenantId) {
         return roleRepository.findByTenantIdIsNullOrTenantId(tenantId);
     }
 
+    @Transactional(readOnly = true)
     public Role get(UUID tenantId, UUID id) {
-        Role role = roleRepository.findById(id)
+        Role role = roleRepository.findByIdFetchingPermissions(id)
                 .orElseThrow(() -> new ApiException(ApiErrorCode.RESOURCE_NOT_FOUND, "Role not found: " + id));
         if (role.getTenantId() != null && !role.getTenantId().equals(tenantId)) {
             throw new ApiException(ApiErrorCode.RESOURCE_NOT_FOUND, "Role not found: " + id);

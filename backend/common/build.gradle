@@ -9,5 +9,6 @@ dependencies {
     // explicit micrometer-core dependency. The concrete registry implementation
     // (`micrometer-registry-prometheus`) is wired once, at the `app` composition root.
     api 'io.micrometer:micrometer-core'
+    api 'org.springframework.data:spring-data-commons'
     implementation 'org.slf4j:slf4j-api'
 }
