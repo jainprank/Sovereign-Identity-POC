@@ -63,7 +63,7 @@ export function VerificationsPage() {
             </option>
           ))}
         </select>
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={createRequest} disabled={!policyId}>
+        <button className="btn-primary" onClick={createRequest} disabled={!policyId}>
           Create OID4VP request
         </button>
       </div>

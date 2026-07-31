@@ -97,7 +97,7 @@ export function CredentialsPage() {
           value={claimsJson}
           onChange={(e) => setClaimsJson(e.target.value)}
         />
-        <button className="bg-blue-600 text-white rounded px-4 py-1 col-span-2" onClick={issue} disabled={!schemaId || !issuerDid}>
+        <button className="btn-primary col-span-2" onClick={issue} disabled={!schemaId || !issuerDid}>
           Issue credential
         </button>
       </div>

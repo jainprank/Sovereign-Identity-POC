@@ -143,7 +143,7 @@ export function TrustRegistryPage() {
       <div className="flex gap-2 mb-4">
         <input className="border rounded px-2 py-1" placeholder="Registry name" value={name} onChange={(e) => setName(e.target.value)} />
         <input className="border rounded px-2 py-1" placeholder="Framework (optional)" value={framework} onChange={(e) => setFramework(e.target.value)} />
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={createRegistry} disabled={!name}>
+        <button className="btn-primary" onClick={createRegistry} disabled={!name}>
           Create registry
         </button>
       </div>
@@ -164,7 +164,7 @@ export function TrustRegistryPage() {
               <td className="p-2">{registry.framework ?? "—"}</td>
               <td className="p-2">{registry.status}</td>
               <td className="p-2 flex gap-2">
-                <button className="text-blue-600" onClick={() => selectRegistry(registry.id)}>
+                <button className="link-primary" onClick={() => selectRegistry(registry.id)}>
                   Issuers
                 </button>
                 {registry.status === "ACTIVE" ? (
@@ -188,7 +188,7 @@ export function TrustRegistryPage() {
           <div className="flex gap-2 mb-4">
             <input className="border rounded px-2 py-1 w-96" placeholder="Issuer DID" value={issuerDid} onChange={(e) => setIssuerDid(e.target.value)} />
             <input className="border rounded px-2 py-1" placeholder="Organization (optional)" value={organization} onChange={(e) => setOrganization(e.target.value)} />
-            <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={registerIssuer} disabled={!issuerDid}>
+            <button className="btn-primary" onClick={registerIssuer} disabled={!issuerDid}>
               Register issuer
             </button>
           </div>
@@ -223,7 +223,7 @@ export function TrustRegistryPage() {
                         Revoke
                       </button>
                     )}
-                    <button className="text-blue-600" onClick={() => viewEvents(issuer.id)}>
+                    <button className="link-primary" onClick={() => viewEvents(issuer.id)}>
                       History
                     </button>
                   </td>

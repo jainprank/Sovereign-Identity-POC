@@ -46,7 +46,7 @@ export function NotificationsPage() {
               </p>
             </div>
             {!n.read && (
-              <button className="text-sm text-blue-600" onClick={() => markRead(n.id)}>
+              <button className="text-sm link-primary" onClick={() => markRead(n.id)}>
                 Mark read
               </button>
             )}

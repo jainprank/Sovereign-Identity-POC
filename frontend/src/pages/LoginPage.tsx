@@ -9,7 +9,7 @@ export function LoginPage() {
         <h1 className="text-xl font-semibold mb-4">IDTrust</h1>
         <p className="text-gray-600 mb-6">Sign in with your organization's Keycloak account.</p>
         <button
-          className="w-full bg-blue-600 text-white rounded px-4 py-2"
+          className="w-full btn-primary py-2"
           onClick={() => auth.signinRedirect()}
         >
           Sign in

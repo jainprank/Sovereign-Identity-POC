@@ -65,7 +65,7 @@ export function AuditLogPage() {
       <div className="flex gap-2 mb-4">
         <input className="border rounded px-2 py-1" placeholder="Filter by action" value={action} onChange={(e) => setAction(e.target.value)} />
         <input className="border rounded px-2 py-1" placeholder="Filter by resource type" value={resourceType} onChange={(e) => setResourceType(e.target.value)} />
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={load}>
+        <button className="btn-primary" onClick={load}>
           Search
         </button>
         <button className="border rounded px-4 py-1" onClick={exportCsv}>

@@ -111,7 +111,7 @@ export function TemplatesPage() {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
-        <button className="bg-blue-600 text-white rounded px-4 py-1 col-span-2" onClick={create} disabled={!schemaId || !name}>
+        <button className="btn-primary col-span-2" onClick={create} disabled={!schemaId || !name}>
           Create template
         </button>
       </div>

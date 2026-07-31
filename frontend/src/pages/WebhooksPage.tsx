@@ -133,7 +133,7 @@ export function WebhooksPage() {
             </label>
           ))}
         </div>
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={create} disabled={!url || selectedEvents.size === 0}>
+        <button className="btn-primary" onClick={create} disabled={!url || selectedEvents.size === 0}>
           Create webhook
         </button>
       </div>
@@ -157,7 +157,7 @@ export function WebhooksPage() {
                 <button className={endpoint.active ? "text-yellow-600" : "text-green-600"} onClick={() => setActive(endpoint.id, !endpoint.active)}>
                   {endpoint.active ? "Deactivate" : "Activate"}
                 </button>
-                <button className="text-blue-600" onClick={() => viewDeliveries(endpoint.id)}>
+                <button className="link-primary" onClick={() => viewDeliveries(endpoint.id)}>
                   Deliveries
                 </button>
               </td>
@@ -190,7 +190,7 @@ export function WebhooksPage() {
                   <td className="p-2 text-xs text-red-600">{delivery.lastError ?? "—"}</td>
                   <td className="p-2">
                     {delivery.status === "FAILED" && (
-                      <button className="text-blue-600" onClick={() => retry(delivery.id)}>
+                      <button className="link-primary" onClick={() => retry(delivery.id)}>
                         Retry
                       </button>
                     )}

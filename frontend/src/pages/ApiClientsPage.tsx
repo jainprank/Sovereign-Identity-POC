@@ -92,7 +92,7 @@ export function ApiClientsPage() {
           value={scopes}
           onChange={(e) => setScopes(e.target.value)}
         />
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={create} disabled={!name}>
+        <button className="btn-primary" onClick={create} disabled={!name}>
           Create
         </button>
       </div>

@@ -148,7 +148,7 @@ export function RolesPage() {
             </label>
           ))}
         </div>
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={createRole} disabled={!code || !name}>
+        <button className="btn-primary" onClick={createRole} disabled={!code || !name}>
           Create role
         </button>
       </div>
@@ -195,7 +195,7 @@ export function RolesPage() {
               </option>
             ))}
           </select>
-          <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={assignRole} disabled={!assignUserId || !assignRoleId}>
+          <button className="btn-primary" onClick={assignRole} disabled={!assignUserId || !assignRoleId}>
             Assign
           </button>
         </div>

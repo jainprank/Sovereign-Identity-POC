@@ -136,11 +136,11 @@ export function SchemasPage() {
             </button>
           </div>
         ))}
-        <button className="text-blue-600 text-sm mb-2" onClick={addClaim}>
+        <button className="link-primary text-sm mb-2" onClick={addClaim}>
           + add claim
         </button>
         <div>
-          <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={create} disabled={!name}>
+          <button className="btn-primary" onClick={create} disabled={!name}>
             Create schema (DRAFT)
           </button>
         </div>

@@ -73,7 +73,7 @@ export function OrganizationsPage() {
           value={contactEmail}
           onChange={(e) => setContactEmail(e.target.value)}
         />
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={create} disabled={!name}>
+        <button className="btn-primary" onClick={create} disabled={!name}>
           Create organization
         </button>
       </div>

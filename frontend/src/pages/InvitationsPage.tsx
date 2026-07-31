@@ -85,7 +85,7 @@ export function InvitationsPage() {
             </option>
           ))}
         </select>
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={invite} disabled={!email || !roleId}>
+        <button className="btn-primary" onClick={invite} disabled={!email || !roleId}>
           Invite
         </button>
       </div>

@@ -105,7 +105,7 @@ export function PoliciesPage() {
           <input type="checkbox" checked={requireNotExpired} onChange={(e) => setRequireNotExpired(e.target.checked)} />
           require not expired
         </label>
-        <button className="bg-blue-600 text-white rounded px-4 py-1 col-span-2" onClick={create} disabled={!name}>
+        <button className="btn-primary col-span-2" onClick={create} disabled={!name}>
           Create policy (DRAFT)
         </button>
       </div>

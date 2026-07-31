@@ -92,7 +92,7 @@ export function TenantsPage() {
           onChange={(e) => setName(e.target.value)}
         />
         <button
-          className="bg-blue-600 text-white rounded px-4 py-1"
+          className="btn-primary"
           onClick={create}
           disabled={!organizationId || !name}
         >

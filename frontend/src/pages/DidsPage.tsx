@@ -69,7 +69,7 @@ export function DidsPage() {
             onChange={(e) => setDomain(e.target.value)}
           />
         )}
-        <button className="bg-blue-600 text-white rounded px-4 py-1" onClick={create}>
+        <button className="btn-primary" onClick={create}>
           Create DID
         </button>
       </div>
