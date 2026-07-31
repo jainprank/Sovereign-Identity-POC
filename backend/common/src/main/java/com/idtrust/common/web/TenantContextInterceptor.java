@@ -26,10 +26,18 @@ import java.util.UUID;
  * before this MVC interceptor), but this interceptor is the last place still guaranteed to run for
  * every dispatched request, so it is the safest single place to guarantee all three thread-locals
  * are released back to the (pooled) request-handling thread.
+ *
+ * <p>Because {@code afterCompletion} runs from inside {@code DispatcherServlet}'s dispatch - i.e.
+ * <em>before</em> control returns to any servlet {@code Filter} wrapping that dispatch, including
+ * {@code apiplatform.log.ApiRequestLoggingFilter} (FR-API-007) - this method snapshots the
+ * resolved tenant/API-client id onto request attributes first, so that filter can still record
+ * who made the request in its own {@code finally} block after these thread-locals are gone.</p>
  */
 public class TenantContextInterceptor implements HandlerInterceptor {
 
     public static final String HEADER_NAME = "X-Tenant-ID";
+    public static final String RESOLVED_TENANT_ID_ATTRIBUTE = "com.idtrust.resolvedTenantId";
+    public static final String RESOLVED_API_CLIENT_ID_ATTRIBUTE = "com.idtrust.resolvedApiClientId";
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
@@ -46,6 +54,8 @@ public class TenantContextInterceptor implements HandlerInterceptor {
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        request.setAttribute(RESOLVED_TENANT_ID_ATTRIBUTE, TenantContext.getTenantId());
+        request.setAttribute(RESOLVED_API_CLIENT_ID_ATTRIBUTE, CurrentApiClientContext.getApiClientId());
         TenantContext.clear();
         CurrentUserContext.clear();
         CurrentApiClientContext.clear();

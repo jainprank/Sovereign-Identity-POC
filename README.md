@@ -46,20 +46,42 @@ Build order agreed 2026-07-28:
 | Epic | Scope | Status |
 | --- | --- | --- |
 | E01 | Foundation (this scaffold: repo, Docker Compose, CI, health check, module skeleton) | ✅ done |
-| E02 | IAM / Tenancy / RBAC | ⚠️ implemented, unverified (no local build yet) |
-| E03 | Database / Row-Level Security | ⚠️ implemented, unverified (no local build yet) |
-| E04 | DID | ⚠️ implemented, unverified (no local build yet) |
-| E05 | KMS / Key Lifecycle | ⚠️ implemented, unverified (no local build yet) |
-| E06 | Schemas / Templates | ⚠️ implemented, unverified (no local build yet) |
-| E07 | Credential Issuance | ⚠️ implemented, unverified (no local build yet) |
-| E08 | Status / Revocation | ⚠️ implemented, unverified (no local build yet) |
-| E09 | OID4VCI / Wallets | ⚠️ implemented, unverified (no local build yet) |
-| E10 | OID4VP / Verification | ⚠️ implemented, unverified (no local build yet) |
-| E11 | SD-JWT | ⚠️ implemented, unverified (no local build yet) |
-| E12 | Trust Registry | ⚠️ implemented, unverified (no local build yet) |
-| E13 | Hedera | ⚠️ implemented, unverified (no local build yet) |
-| E14 | Enterprise Integrations | ⚠️ implemented, unverified (no local build yet) |
-| E15 | UI / QA / Security / Production | ⚠️ implemented, unverified (no local build yet) |
+| E02 | IAM / Tenancy / RBAC | ✅ verified (built + exercised against a live backend) |
+| E03 | Database / Row-Level Security | ✅ verified (built + exercised against a live backend) |
+| E04 | DID | ✅ verified (built + exercised against a live backend) |
+| E05 | KMS / Key Lifecycle | ✅ verified (built + exercised against a live backend) |
+| E06 | Schemas / Templates | ✅ verified (built + exercised against a live backend) |
+| E07 | Credential Issuance | ✅ verified (built + exercised against a live backend) |
+| E08 | Status / Revocation | ✅ verified (built + exercised against a live backend) |
+| E09 | OID4VCI / Wallets | ✅ verified (built + exercised against a live backend) |
+| E10 | OID4VP / Verification | ✅ verified (built + exercised against a live backend) |
+| E11 | SD-JWT | ✅ verified (built + exercised against a live backend) |
+| E12 | Trust Registry | ✅ verified (built + exercised against a live backend) |
+| E13 | Hedera | ✅ verified (built + exercised against a live backend) |
+| E14 | Enterprise Integrations | ✅ verified (built + exercised against a live backend) |
+| E15 | UI / QA / Security / Production | ✅ verified (built + exercised against a live backend) |
+
+All epics above were verified by running the full modular monolith against a live Postgres +
+Keycloak stack and exercising each epic's real endpoints via `curl` (there are effectively no
+automated tests in this codebase). Three real bugs were found and fixed during this pass:
+
+1. **API key / OAuth access token bearer auth was universally broken.** `BearerTokenAuthenticationFilter`
+   unconditionally tried to decode any presented bearer token as a Keycloak JWT regardless of
+   whether an earlier filter (`ApiKeyAuthenticationFilter`) had already authenticated it via an
+   opaque, non-JWT credential — every API key/OAuth-client request 401'd. Fixed in
+   `identity.security.SecurityConfig`'s `SelectiveBearerTokenResolver` by also short-circuiting
+   when the `SecurityContext` already holds an `Authentication`.
+2. **`@PreAuthorize` denials returned 500 instead of 403.** Spring Security 6's
+   `AuthorizationDeniedException` (thrown by the method-security AOP proxy around the controller
+   method, not the security filter chain) fell through `GlobalExceptionHandler`'s generic
+   `Exception` catch-all. Fixed by adding a dedicated `AccessDeniedException` handler mapping to
+   `FORBIDDEN`/403.
+3. **API request logs (FR-API-007) were always persisted with a null tenant/API-client id.**
+   `TenantContextInterceptor.afterCompletion` (an MVC interceptor) cleared `TenantContext`/
+   `CurrentApiClientContext` *before* `ApiRequestLoggingFilter`'s outer servlet-filter `finally`
+   block ran, so every log row lost its tenant attribution and the query endpoint always returned
+   empty. Fixed by having the interceptor snapshot the resolved ids onto request attributes before
+   clearing, which the filter now reads instead.
 
 ## E02/E03: IAM, Tenancy, RBAC, Row-Level Security
 

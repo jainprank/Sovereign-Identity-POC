@@ -5,6 +5,7 @@ import com.idtrust.common.security.ApiCredentialAuthenticator;
 import com.idtrust.identity.idempotency.IdempotencyFilter;
 import com.idtrust.identity.idempotency.IdempotencyKeyRepository;
 import com.idtrust.identity.user.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -12,6 +13,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
@@ -98,7 +101,16 @@ public class SecurityConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
+                        // OID4VCI's /credential endpoint (permitAll above) receives an opaque
+                        // pre-authorized-code access token in its Authorization header, not a
+                        // Keycloak JWT - Oid4vciController parses it itself. Without this resolver,
+                        // BearerTokenAuthenticationFilter still unconditionally tries to decode ANY
+                        // presented bearer token as a JWT (authentication is evaluated before
+                        // authorization/permitAll), fails, and 401s via RestAuthenticationEntryPoint
+                        // before the request ever reaches the controller. Returning null here makes
+                        // that filter treat the request as having no bearer token at all.
+                        .bearerTokenResolver(new SelectiveBearerTokenResolver()))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))
                         .accessDeniedHandler(new RestAccessDeniedHandler(objectMapper)))
@@ -107,5 +119,43 @@ public class SecurityConfig {
                 .addFilterAfter(new IdempotencyFilter(idempotencyKeyRepository, objectMapper), TenantMembershipFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * Delegates to Spring's default resolution except in two cases where the presented bearer
+     * value is known not to be a Keycloak JWT, and so must not be handed to
+     * {@code BearerTokenAuthenticationFilter} for JWT decoding:
+     *
+     * <ol>
+     *   <li>{@code /api/v1/oid4vci/credential}, whose {@code Authorization} header carries an
+     *   opaque OID4VCI pre-authorized-code access token - {@code Oid4vciController} parses it
+     *   itself.</li>
+     *   <li>Any request {@link ApiKeyAuthenticationFilter} has already authenticated (its
+     *   authentication is present in the {@link org.springframework.security.core.context.SecurityContext}
+     *   by the time this resolver runs, since that filter is registered
+     *   {@code addFilterBefore(..., BearerTokenAuthenticationFilter.class)}) - an FR-API-001 API
+     *   key or FR-API-002 OAuth access token, both opaque, non-JWT bearer credentials.</li>
+     * </ol>
+     *
+     * <p>Without this, {@code BearerTokenAuthenticationFilter} still unconditionally tries to
+     * decode the raw bearer value as a JWT regardless of what an earlier filter already put in the
+     * {@code SecurityContext} - it fails, and 401s via {@link RestAuthenticationEntryPoint} before
+     * the request ever reaches the controller. Returning {@code null} here makes that filter treat
+     * the request as having no bearer token at all.
+     */
+    private static final class SelectiveBearerTokenResolver implements BearerTokenResolver {
+
+        private final BearerTokenResolver delegate = new DefaultBearerTokenResolver();
+
+        @Override
+        public String resolve(HttpServletRequest request) {
+            if ("/api/v1/oid4vci/credential".equals(request.getRequestURI())) {
+                return null;
+            }
+            if (org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null) {
+                return null;
+            }
+            return delegate.resolve(request);
+        }
     }
 }

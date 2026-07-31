@@ -11,4 +11,10 @@ dependencies {
     api 'io.micrometer:micrometer-core'
     api 'org.springframework.data:spring-data-commons'
     implementation 'org.slf4j:slf4j-api'
+    // GlobalExceptionHandler.handleAccessDenied - every module already carries spring-security-core
+    // transitively via the identity module's actual security wiring; declaring it directly here
+    // too is needed so this shared @RestControllerAdvice can translate @PreAuthorize's
+    // AuthorizationDeniedException (a subtype of AccessDeniedException) into a 403 instead of
+    // letting it fall through to the catch-all 500 handler.
+    implementation 'org.springframework.security:spring-security-core'
 }

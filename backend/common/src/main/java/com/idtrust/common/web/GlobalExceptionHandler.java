@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -50,6 +51,22 @@ public class GlobalExceptionHandler {
                 .toList();
         ApiError body = ApiError.of(ApiErrorCode.VALIDATION_ERROR, "Request validation failed", correlationId(request), details);
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.httpStatus()).body(body);
+    }
+
+    /**
+     * {@code @PreAuthorize} denials (Spring Security 6's {@code AuthorizationDeniedException},
+     * a subtype of this) are thrown from inside the method-security AOP proxy wrapping the
+     * controller method itself, so - unlike a filter-level authentication failure - they surface
+     * to Spring MVC's exception resolution (this advice) rather than to
+     * {@code ExceptionTranslationFilter}/{@code RestAccessDeniedHandler} in the security filter
+     * chain. Without this handler they fell through to {@link #handleUnexpected} below and were
+     * reported as a 500, masking a routine, correctly-enforced 403.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+        countError(ApiErrorCode.FORBIDDEN.name());
+        ApiError body = ApiError.of(ApiErrorCode.FORBIDDEN, ex.getMessage(), correlationId(request), List.of());
+        return ResponseEntity.status(ApiErrorCode.FORBIDDEN.httpStatus()).body(body);
     }
 
     @ExceptionHandler(Exception.class)

@@ -29,7 +29,9 @@ public class DidKeyEvent {
     @Column(name = "did_id")
     private UUID didId;
 
-    @Column(name = "key_id", nullable = false)
+    // Nullable: ON DELETE SET NULL once the key itself is hard-deleted (see V42 migration) -
+    // this row's history stays queryable by didId even after the key it refers to is gone.
+    @Column(name = "key_id")
     private UUID keyId;
 
     @Column(name = "previous_key_id")
