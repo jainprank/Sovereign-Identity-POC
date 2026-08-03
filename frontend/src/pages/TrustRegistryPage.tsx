@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { createApiClient } from "../lib/api";
 import { useTenant } from "../tenant/TenantContext";
+import { HederaAnchorLink } from "../components/HederaAnchorLink";
 
 interface RegistryResponse {
   id: string;
@@ -198,6 +199,7 @@ export function TrustRegistryPage() {
                 <th className="p-2">Issuer DID</th>
                 <th className="p-2">Organization</th>
                 <th className="p-2">Status</th>
+                <th className="p-2">Hedera anchor</th>
                 <th className="p-2"></th>
               </tr>
             </thead>
@@ -207,6 +209,9 @@ export function TrustRegistryPage() {
                   <td className="p-2 font-mono text-xs">{issuer.issuerDid}</td>
                   <td className="p-2">{issuer.organization ?? "—"}</td>
                   <td className="p-2">{issuer.status}</td>
+                  <td className="p-2">
+                    <HederaAnchorLink api={client} resourceType="TRUSTED_ISSUER" resourceId={issuer.id} />
+                  </td>
                   <td className="p-2 flex gap-2">
                     {issuer.status !== "TRUSTED" && (
                       <button className="text-green-600" onClick={() => updateIssuerStatus(issuer.id, "TRUSTED")}>
