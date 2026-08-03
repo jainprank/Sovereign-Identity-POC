@@ -3,6 +3,7 @@ import { useAuth } from "react-oidc-context";
 import { createApiClient } from "../lib/api";
 import { useTenant } from "../tenant/TenantContext";
 import type { PageResponse } from "../lib/pageResponse";
+import { HederaAnchorLink } from "../components/HederaAnchorLink";
 
 interface SchemaResponse {
   id: string;
@@ -18,6 +19,13 @@ interface CredentialResponse {
   issuedAt: string;
 }
 
+interface OfferResponse {
+  preAuthorizedCode: string;
+  credentialOfferUri: string;
+  qrCodePngBase64: string;
+  expiresAt: string;
+}
+
 export function CredentialsPage() {
   const auth = useAuth();
   const { tenantId } = useTenant();
@@ -30,6 +38,11 @@ export function CredentialsPage() {
   const [subjectDid, setSubjectDid] = useState("");
   const [claimsJson, setClaimsJson] = useState('{\n  "name": "Alice"\n}');
   const [error, setError] = useState<string | null>(null);
+
+  const [offerCredentialId, setOfferCredentialId] = useState<string | null>(null);
+  const [offer, setOffer] = useState<OfferResponse | null>(null);
+  const [offerLoading, setOfferLoading] = useState(false);
+  const [offerError, setOfferError] = useState<string | null>(null);
 
   function load() {
     if (!tenantId) return;
@@ -59,6 +72,21 @@ export function CredentialsPage() {
       load();
     } catch {
       setError("Could not issue credential - check the schema is PUBLISHED and the issuer DID is valid.");
+    }
+  }
+
+  async function generateOffer(credentialId: string) {
+    setOfferCredentialId(credentialId);
+    setOffer(null);
+    setOfferError(null);
+    setOfferLoading(true);
+    try {
+      const response = await client.post<OfferResponse>("/api/v1/oid4vci/offers", { credentialId });
+      setOffer(response.data);
+    } catch {
+      setOfferError("Could not generate an offer for this credential.");
+    } finally {
+      setOfferLoading(false);
     }
   }
 
@@ -107,6 +135,8 @@ export function CredentialsPage() {
             <th className="p-2">Subject DID</th>
             <th className="p-2">Status</th>
             <th className="p-2">Issued</th>
+            <th className="p-2">Hedera anchor</th>
+            <th className="p-2"></th>
           </tr>
         </thead>
         <tbody>
@@ -115,10 +145,48 @@ export function CredentialsPage() {
               <td className="p-2 font-mono">{c.subjectDid ?? "—"}</td>
               <td className="p-2">{c.status}</td>
               <td className="p-2">{new Date(c.issuedAt).toLocaleString()}</td>
+              <td className="p-2">
+                <HederaAnchorLink api={client} resourceType="CREDENTIAL" resourceId={c.id} />
+              </td>
+              <td className="p-2 text-right">
+                <button
+                  className="text-indigo-600 hover:underline"
+                  onClick={() => generateOffer(c.id)}
+                  disabled={offerLoading && offerCredentialId === c.id}
+                >
+                  {offerLoading && offerCredentialId === c.id ? "Generating…" : "Generate offer"}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+
+      {offerCredentialId && (
+        <div className="bg-white shadow rounded p-4 mt-6 max-w-md">
+          <h3 className="font-semibold mb-2">Claimable offer</h3>
+          {offerError && <p className="text-red-600 mb-2">{offerError}</p>}
+          {offer && (
+            <>
+              <img
+                src={`data:image/png;base64,${offer.qrCodePngBase64}`}
+                alt="OID4VCI offer QR code"
+                className="w-48 h-48 mb-3"
+              />
+              <p className="text-sm text-gray-500 mb-1">
+                Scan with the wallet app, or paste this code into "Enter code manually":
+              </p>
+              <input
+                readOnly
+                className="border rounded px-2 py-1 w-full font-mono text-xs mb-2"
+                value={offer.preAuthorizedCode}
+                onFocus={(e) => e.target.select()}
+              />
+              <p className="text-xs text-gray-500">Expires {new Date(offer.expiresAt).toLocaleTimeString()}</p>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

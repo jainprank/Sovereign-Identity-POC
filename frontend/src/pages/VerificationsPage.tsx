@@ -25,6 +25,7 @@ export function VerificationsPage() {
   const [requests, setRequests] = useState<VerificationResponse[]>([]);
   const [policyId, setPolicyId] = useState("");
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [requestUri, setRequestUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function load() {
@@ -40,6 +41,7 @@ export function VerificationsPage() {
     try {
       const response = await client.post("/api/v1/verification-requests", { policyId });
       setQrCode(response.data.qrCodePngBase64);
+      setRequestUri(response.data.oid4vpRequestUri);
       load();
     } catch {
       setError("Could not create verification request - check you have a published policy.");
@@ -68,9 +70,18 @@ export function VerificationsPage() {
         </button>
       </div>
       {qrCode && (
-        <div className="mb-6">
-          <p className="text-sm text-gray-500 mb-2">Scan with a wallet:</p>
-          <img src={`data:image/png;base64,${qrCode}`} alt="OID4VP QR code" className="w-48 h-48" />
+        <div className="bg-white shadow rounded p-4 mb-6 max-w-md">
+          <p className="text-sm text-gray-500 mb-2">Scan with the wallet app:</p>
+          <img src={`data:image/png;base64,${qrCode}`} alt="OID4VP QR code" className="w-48 h-48 mb-3" />
+          <p className="text-sm text-gray-500 mb-1">
+            Or paste this into the wallet's "Enter code manually" (Scan tab):
+          </p>
+          <input
+            readOnly
+            className="border rounded px-2 py-1 w-full font-mono text-xs"
+            value={requestUri ?? ""}
+            onFocus={(e) => e.target.select()}
+          />
         </div>
       )}
       <table className="w-full bg-white shadow rounded">

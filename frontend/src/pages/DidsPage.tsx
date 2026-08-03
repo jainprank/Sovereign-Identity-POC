@@ -3,6 +3,7 @@ import { useAuth } from "react-oidc-context";
 import { createApiClient } from "../lib/api";
 import { useTenant } from "../tenant/TenantContext";
 import type { PageResponse } from "../lib/pageResponse";
+import { HederaAnchorLink } from "../components/HederaAnchorLink";
 
 interface DidResponse {
   id: string;
@@ -80,6 +81,7 @@ export function DidsPage() {
             <th className="p-2">Method</th>
             <th className="p-2">Status</th>
             <th className="p-2">Created</th>
+            <th className="p-2">Hedera anchor</th>
           </tr>
         </thead>
         <tbody>
@@ -89,6 +91,9 @@ export function DidsPage() {
               <td className="p-2">{did.method}</td>
               <td className="p-2">{did.status}</td>
               <td className="p-2">{new Date(did.createdAt).toLocaleString()}</td>
+              <td className="p-2">
+                <HederaAnchorLink api={client} resourceType="DID" resourceId={did.id} />
+              </td>
             </tr>
           ))}
         </tbody>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import { createApiClient } from "../lib/api";
 import { useTenant } from "../tenant/TenantContext";
@@ -16,6 +16,7 @@ interface TemplateResponse {
   schemaId: string;
   name: string;
   description: string | null;
+  defaultClaims: Record<string, unknown>;
   defaultExpiresInDays: number | null;
   createdAt: string;
 }
@@ -31,8 +32,15 @@ export function TemplatesPage() {
   const [schemaId, setSchemaId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [defaultClaimsJson, setDefaultClaimsJson] = useState("{}");
   const [defaultExpiresInDays, setDefaultExpiresInDays] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDescription, setEditDescription] = useState("");
+  const [editClaimsJson, setEditClaimsJson] = useState("{}");
+  const [editExpiresInDays, setEditExpiresInDays] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
 
   function load() {
     if (!tenantId) return;
@@ -50,15 +58,24 @@ export function TemplatesPage() {
 
   async function create() {
     setError(null);
+    let defaultClaims: Record<string, unknown>;
+    try {
+      defaultClaims = JSON.parse(defaultClaimsJson);
+    } catch {
+      setError("Default claims must be valid JSON.");
+      return;
+    }
     try {
       await client.post("/api/v1/credential-templates", {
         schemaId,
         name,
         description: description || null,
+        defaultClaims,
         defaultExpiresInDays: defaultExpiresInDays ? Number(defaultExpiresInDays) : null,
       });
       setName("");
       setDescription("");
+      setDefaultClaimsJson("{}");
       setDefaultExpiresInDays("");
       load();
     } catch {
@@ -73,6 +90,42 @@ export function TemplatesPage() {
       load();
     } catch {
       setError("Could not delete template.");
+    }
+  }
+
+  function startEdit(t: TemplateResponse) {
+    setEditingId(t.id);
+    setEditDescription(t.description ?? "");
+    setEditClaimsJson(JSON.stringify(t.defaultClaims ?? {}, null, 2));
+    setEditExpiresInDays(t.defaultExpiresInDays != null ? String(t.defaultExpiresInDays) : "");
+    setEditError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditError(null);
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    setEditError(null);
+    let defaultClaims: Record<string, unknown>;
+    try {
+      defaultClaims = JSON.parse(editClaimsJson);
+    } catch {
+      setEditError("Default claims must be valid JSON.");
+      return;
+    }
+    try {
+      await client.patch(`/api/v1/credential-templates/${editingId}`, {
+        description: editDescription || null,
+        defaultClaims,
+        defaultExpiresInDays: editExpiresInDays ? Number(editExpiresInDays) : null,
+      });
+      setEditingId(null);
+      load();
+    } catch {
+      setEditError("Could not save changes.");
     }
   }
 
@@ -111,6 +164,15 @@ export function TemplatesPage() {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
+        <div className="col-span-2">
+          <p className="text-sm text-gray-500 mb-1">Default claims (pre-filled when issuing from this template)</p>
+          <textarea
+            className="border rounded px-2 py-1 w-full font-mono text-sm"
+            rows={4}
+            value={defaultClaimsJson}
+            onChange={(e) => setDefaultClaimsJson(e.target.value)}
+          />
+        </div>
         <button className="btn-primary col-span-2" onClick={create} disabled={!schemaId || !name}>
           Create template
         </button>
@@ -126,16 +188,60 @@ export function TemplatesPage() {
         </thead>
         <tbody>
           {templates.map((t) => (
-            <tr key={t.id} className="border-b text-sm">
-              <td className="p-2">{t.name}</td>
-              <td className="p-2">{schemaLabel(t.schemaId)}</td>
-              <td className="p-2">{t.defaultExpiresInDays ? `${t.defaultExpiresInDays} days` : "—"}</td>
-              <td className="p-2">
-                <button className="text-red-600" onClick={() => remove(t.id)}>
-                  Delete
-                </button>
-              </td>
-            </tr>
+            <Fragment key={t.id}>
+              <tr className="border-b text-sm">
+                <td className="p-2">{t.name}</td>
+                <td className="p-2">{schemaLabel(t.schemaId)}</td>
+                <td className="p-2">{t.defaultExpiresInDays ? `${t.defaultExpiresInDays} days` : "—"}</td>
+                <td className="p-2 whitespace-nowrap">
+                  {editingId === t.id ? (
+                    <button className="text-gray-600" onClick={cancelEdit}>
+                      Cancel
+                    </button>
+                  ) : (
+                    <button className="text-indigo-600 mr-3" onClick={() => startEdit(t)}>
+                      Edit
+                    </button>
+                  )}
+                  <button className="text-red-600" onClick={() => remove(t.id)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+              {editingId === t.id && (
+                <tr className="border-b bg-gray-50">
+                  <td colSpan={4} className="p-3">
+                    {editError && <p className="text-red-600 mb-2 text-sm">{editError}</p>}
+                    <div className="grid grid-cols-2 gap-3 max-w-2xl">
+                      <input
+                        className="border rounded px-2 py-1 col-span-2"
+                        placeholder="Description (optional)"
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                      />
+                      <input
+                        className="border rounded px-2 py-1"
+                        placeholder="Default expiry (days, optional)"
+                        value={editExpiresInDays}
+                        onChange={(e) => setEditExpiresInDays(e.target.value)}
+                      />
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-500 mb-1">Default claims</p>
+                        <textarea
+                          className="border rounded px-2 py-1 w-full font-mono text-sm"
+                          rows={4}
+                          value={editClaimsJson}
+                          onChange={(e) => setEditClaimsJson(e.target.value)}
+                        />
+                      </div>
+                      <button className="btn-primary col-span-2" onClick={saveEdit}>
+                        Save
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
