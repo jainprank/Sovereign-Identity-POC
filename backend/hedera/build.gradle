@@ -12,4 +12,9 @@ dependencies {
     // Hedera Consensus Service when idtrust.hedera.enabled=true, per the master prompt's "do not
     // create mock functionality where production functionality is required" rule.
     implementation 'com.hedera.hashgraph:sdk:2.66.0'
+    // The SDK depends on io.grpc:grpc-api/-stub/-inprocess transitively but not an actual network
+    // transport (per Hedera's own docs, non-Android consumers must add this explicitly) - without
+    // it, every real (non-inprocess-test) call throws io.grpc.ManagedChannelProvider$ProviderNotFoundException
+    // at runtime, silently breaking anchoring even with idtrust.hedera.enabled=true and valid keys.
+    runtimeOnly 'io.grpc:grpc-netty-shaded:1.75.0'
 }

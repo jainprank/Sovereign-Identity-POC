@@ -103,12 +103,28 @@ public class HcsHederaAnchorPublisher implements HederaAnchorPublisher {
     private static Client buildClient(HederaProperties properties) {
         try {
             Client client = Client.forName(properties.network());
-            client.setOperator(AccountId.fromString(properties.accountId()), PrivateKey.fromString(properties.operatorKey()));
+            client.setOperator(AccountId.fromString(properties.accountId()), parseOperatorKey(properties.operatorKey()));
             return client;
         } catch (Exception e) {
             log.warn("Failed to initialize Hedera client (network={}): {} - anchoring will behave as disabled",
                     properties.network(), e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * {@link PrivateKey#fromString} auto-detects DER-encoded ED25519/ECDSA strings correctly, but
+     * a bare 32-byte hex string (the conventional format for an EVM-aliased account's ECDSA key,
+     * as opposed to a DER-wrapped one) is ambiguous - it silently parses as ED25519 instead, giving
+     * a key whose public component doesn't match the real ECDSA account, so every transaction it
+     * signs is rejected by the network with INVALID_SIGNATURE. A leading {@code 0x} is never valid
+     * on a DER or ED25519 hex string but is the standard convention for a raw ECDSA/EVM key, so it
+     * doubles as a reliable discriminator here.
+     */
+    private static PrivateKey parseOperatorKey(String rawKey) {
+        if (rawKey.startsWith("0x") || rawKey.startsWith("0X")) {
+            return PrivateKey.fromStringECDSA(rawKey.substring(2));
+        }
+        return PrivateKey.fromString(rawKey);
     }
 }
