@@ -60,9 +60,12 @@ import java.util.UUID;
  * FR-WAL-018 through 022 (backup/recovery, multi-device sync, lock/PIN, biometric, offline mode)
  * are V1/V2-priority and also out of scope.
  *
- * <p>{@link #list} is a known limitation: it returns every wallet in the tenant rather than only
- * those owned by the calling holder, since no per-holder "my resources" pattern exists anywhere
- * else in this codebase yet either. Documented in the README rather than worked around here.
+ * <p>{@link #list} is role-conditional: a HOLDER caller only ever sees wallets they themselves own
+ * ({@link Wallet#getOwnerUserId()}), while PLATFORM_ADMIN/ORG_ADMIN keep seeing every wallet in the
+ * tenant, consistent with those roles' ability to operate wallets on a tenant's behalf. The role
+ * check uses {@link CurrentUserContext#hasAnyRole} rather than a parameter, since this is a plain
+ * {@code @Service} with no {@code @PreAuthorize} of its own - {@link CurrentUserContext} is
+ * populated with the caller's realm roles by the identity module's {@code TenantMembershipFilter}.
  */
 @Service
 public class WalletService {
@@ -110,7 +113,10 @@ public class WalletService {
     }
 
     public List<Wallet> list(UUID tenantId) {
-        return walletRepository.findByTenantId(tenantId);
+        if (CurrentUserContext.hasAnyRole("PLATFORM_ADMIN", "ORG_ADMIN")) {
+            return walletRepository.findByTenantId(tenantId);
+        }
+        return walletRepository.findByTenantIdAndOwnerUserId(tenantId, CurrentUserContext.getUserId());
     }
 
     public List<WalletCredentialView> listCredentials(UUID tenantId, UUID walletId, String category) {

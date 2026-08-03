@@ -55,7 +55,7 @@ export function CredentialsPage() {
       return;
     }
     try {
-      await client.post("/api/v1/credentials", { schemaId, issuerDid, subjectDid, claims });
+      await client.post("/api/v1/credentials", { schemaId, issuerDid, subjectDid: subjectDid.trim() || null, claims });
       load();
     } catch {
       setError("Could not issue credential - check the schema is PUBLISHED and the issuer DID is valid.");

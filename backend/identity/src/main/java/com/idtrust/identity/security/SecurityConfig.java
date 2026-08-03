@@ -12,6 +12,14 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
 import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
@@ -23,6 +31,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Wires the identity module's API into Spring Security's OAuth2 Resource Server support
@@ -39,6 +48,21 @@ import java.util.List;
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    /**
+     * Replaces Spring Boot's default single-{@code issuer-uri} auto-configured decoder - see
+     * {@link JwtIssuerProperties}'s Javadoc for why local dev/testing needs more than one accepted
+     * issuer. The JWK Set is still fetched from one fixed, backend-reachable URL; only the {@code
+     * iss} claim check is relaxed to a list.
+     */
+    @Bean
+    public JwtDecoder jwtDecoder(JwtIssuerProperties jwtIssuerProperties) {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwtIssuerProperties.jwksUri()).build();
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                new JwtTimestampValidator(),
+                new AcceptedIssuersValidator(Set.copyOf(jwtIssuerProperties.acceptedIssuers()))));
+        return decoder;
+    }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource(SecurityCorsProperties corsProperties) {
@@ -143,6 +167,31 @@ public class SecurityConfig {
      * the request ever reaches the controller. Returning {@code null} here makes that filter treat
      * the request as having no bearer token at all.
      */
+    /**
+     * Accepts a JWT's {@code iss} claim against a fixed set of allowed values rather than Spring's
+     * default single-issuer check - see {@link JwtIssuerProperties}'s Javadoc.
+     */
+    private static final class AcceptedIssuersValidator implements OAuth2TokenValidator<Jwt> {
+
+        private static final OAuth2Error INVALID_ISSUER =
+                new OAuth2Error("invalid_token", "The iss claim is not among the accepted issuers", null);
+
+        private final Set<String> acceptedIssuers;
+
+        private AcceptedIssuersValidator(Set<String> acceptedIssuers) {
+            this.acceptedIssuers = acceptedIssuers;
+        }
+
+        @Override
+        public OAuth2TokenValidatorResult validate(Jwt token) {
+            String issuer = token.getIssuer() != null ? token.getIssuer().toString() : null;
+            if (issuer != null && acceptedIssuers.contains(issuer)) {
+                return OAuth2TokenValidatorResult.success();
+            }
+            return OAuth2TokenValidatorResult.failure(INVALID_ISSUER);
+        }
+    }
+
     private static final class SelectiveBearerTokenResolver implements BearerTokenResolver {
 
         private final BearerTokenResolver delegate = new DefaultBearerTokenResolver();

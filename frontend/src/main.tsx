@@ -4,12 +4,15 @@ import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "react-oidc-context";
 import { App } from "./App";
 import { TenantProvider } from "./tenant/TenantContext";
-import { oidcConfig } from "./auth/oidcConfig";
+import { userManager, onSigninCallback } from "./auth/oidcConfig";
+import { setupNativeAuthDeepLink } from "./auth/nativeDeepLink";
 import "./styles/index.css";
+
+setupNativeAuthDeepLink();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <AuthProvider {...oidcConfig}>
+    <AuthProvider userManager={userManager} onSigninCallback={onSigninCallback}>
       <TenantProvider>
         <BrowserRouter>
           <App />

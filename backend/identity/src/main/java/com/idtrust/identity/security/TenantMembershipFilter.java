@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -18,7 +19,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Bridges the authenticated Keycloak JWT to a local, tenant-scoped {@link AppUser} record: bearer
@@ -93,7 +96,16 @@ public class TenantMembershipFilter extends OncePerRequestFilter {
 
         TenantContext.setTenantId(tenantId);
         CurrentUserContext.setUserId(user.getId());
+        CurrentUserContext.setRoles(rolesOf(jwtAuthentication));
         filterChain.doFilter(request, response);
+    }
+
+    /** Strips the {@code ROLE_} prefix {@link KeycloakRealmRoleConverter} adds, e.g. {@code "ROLE_HOLDER"} -> {@code "HOLDER"}. */
+    private Set<String> rolesOf(JwtAuthenticationToken jwtAuthentication) {
+        return jwtAuthentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.startsWith("ROLE_") ? authority.substring(5) : authority)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private AppUser resolveUser(UUID tenantId, Jwt jwt) {

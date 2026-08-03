@@ -21,6 +21,13 @@ import { TemplatesPage } from "./pages/TemplatesPage";
 import { PoliciesPage } from "./pages/PoliciesPage";
 import { TrustRegistryPage } from "./pages/TrustRegistryPage";
 import { AuditLogPage } from "./pages/AuditLogPage";
+import { WalletApp } from "./wallet/WalletApp";
+
+// Set by the `build:wallet` script (via .env.wallet) so the Capacitor-wrapped mobile app ships
+// only the holder-facing wallet, never the admin console routes below - kept as a Vite build-time
+// flag rather than a runtime route guard since the wallet app has no legitimate reason to even
+// bundle the admin pages' code.
+const isWalletTarget = import.meta.env.VITE_APP_TARGET === "wallet";
 
 /**
  * E15 UI scaffold plus the post-E15 admin-console build-out: every route here calls a genuinely
@@ -44,8 +51,13 @@ export function App() {
     );
   }
 
+  if (isWalletTarget) {
+    return <WalletApp />;
+  }
+
   return (
     <Routes>
+      <Route path="/wallet/*" element={<WalletApp />} />
       <Route path="/" element={<Layout />}>
         <Route index element={<DashboardPage />} />
         <Route path="dids" element={<DidsPage />} />

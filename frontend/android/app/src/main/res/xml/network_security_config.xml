@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dev-only: the wallet talks to the local backend/Keycloak over plain HTTP (see .env.local /
+     .env.wallet.local), and Android blocks cleartext traffic by default since API 28. A
+     domain-config scoped to 10.0.2.2 doesn't reliably match since Android's domain matching is
+     hostname-based and treats IP literals inconsistently, so this permits cleartext app-wide
+     instead (standard for local-dev Capacitor builds; never used for a release build). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

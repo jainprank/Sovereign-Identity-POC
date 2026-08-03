@@ -20,12 +20,6 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${KEYCLOAK_URL:http://localhost:8081}/realms/${KEYCLOAK_REALM:idtrust}
-
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
@@ -70,6 +64,15 @@ idtrust:
       # comma-separated list; override with the real deployed frontend origin(s) in every
       # non-local environment (see identity.security.SecurityCorsProperties' Javadoc).
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+    jwt:
+      # The JWK Set is always fetched by the backend itself, which runs on the same host as
+      # Keycloak - "localhost" is always correct here regardless of what hostname a client used.
+      jwks-uri: ${KEYCLOAK_URL:http://localhost:8081}/realms/${KEYCLOAK_REALM:idtrust}/protocol/openid-connect/certs
+      # Every `iss` claim value this backend accepts - see identity.security.JwtIssuerProperties'
+      # Javadoc for why a single issuer-uri isn't enough once mobile/emulator clients are in play.
+      # JWT_ACCEPTED_ISSUERS is a comma-separated list; extend it (don't replace the default) when
+      # testing from an emulator or device.
+      accepted-issuers: ${JWT_ACCEPTED_ISSUERS:http://localhost:8081/realms/idtrust}
   kms:
     provider: ${KMS_PROVIDER:internal}
     # INSECURE all-zero default for local development ONLY (backend.kms.crypto.KeyEncryptionService's

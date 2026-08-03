@@ -21,8 +21,8 @@ import java.util.UUID;
 /**
  * Tenant-scoped API for EPIC 8 (Digital Wallet): FR-WAL-001, 004 through 009. Open to HOLDER, the
  * seeded role a wallet's actual end user would carry, alongside the usual PLATFORM_ADMIN/ORG_ADMIN
- * who can operate wallets on a tenant's behalf. See {@link WalletService} for the known limitation
- * of {@link #list} returning every wallet in the tenant rather than only the caller's own.
+ * who can operate wallets on a tenant's behalf. See {@link WalletService#list} for how HOLDER
+ * callers are scoped to only the wallet(s) they own, while admins keep full-tenant visibility.
  */
 @RestController
 @RequestMapping("/api/v1/wallets")

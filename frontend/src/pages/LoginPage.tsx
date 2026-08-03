@@ -10,10 +10,11 @@ export function LoginPage() {
         <p className="text-gray-600 mb-6">Sign in with your organization's Keycloak account.</p>
         <button
           className="w-full btn-primary py-2"
-          onClick={() => auth.signinRedirect()}
+          onClick={() => auth.signinRedirect({ state: { returnTo: window.location.pathname + window.location.search } })}
         >
           Sign in
         </button>
+        {auth.error && <p className="mt-4 text-xs text-red-600 break-all">{auth.error.message}</p>}
       </div>
     </div>
   );
