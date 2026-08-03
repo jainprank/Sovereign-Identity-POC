@@ -9,6 +9,18 @@ interface Props {
   onDetect: (text: string) => void;
 }
 
+/** getUserMedia's permission prompt round-trips through a native Android dialog (see
+ * MainActivity/Capacitor's BridgeWebChromeClient); on a slow device that can take a while, or in
+ * rare cases never resolve. Racing it against a timeout means a stuck permission flow degrades to
+ * the manual-entry fallback instead of leaving the whole overlay unresponsive. */
+const CAMERA_START_TIMEOUT_MS = 8000;
+
+/** Full-resolution capture+decode on every animation frame (~60/sec) is what actually pegged the
+ * WebView's JS thread hard enough to trigger an ANR on a constrained device/emulator during
+ * testing - QR content doesn't change fast enough to need that; sampling a few times a second
+ * still detects a held-up code well within human reaction time. */
+const SCAN_INTERVAL_MS = 200;
+
 /**
  * Real camera-based QR scanning (getUserMedia + jsQR sampling video frames onto a hidden
  * canvas) — replaces the design mock's 2200ms `setTimeout` fake detection. Falls back to a
@@ -20,7 +32,7 @@ export function ScannerOverlay({ purpose, onClose, onDetect }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number | null>(null);
+  const intervalRef = useRef<number | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [manual, setManual] = useState("");
   const [showManual, setShowManual] = useState(false);
@@ -28,14 +40,39 @@ export function ScannerOverlay({ purpose, onClose, onDetect }: Props) {
   useEffect(() => {
     let stopped = false;
 
+    function fail(message: string) {
+      if (stopped) return;
+      setCameraError(message);
+      setShowManual(true);
+    }
+
     async function start() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setCameraError("Camera not available on this device.");
-        setShowManual(true);
+        fail("Camera not available on this device.");
         return;
       }
+      let timedOut = false;
+      // Kept separate from the race below (rather than relying on Promise.race to discard it) so
+      // a getUserMedia call that resolves *after* the timeout already fired still gets its stream
+      // stopped immediately instead of silently holding the camera open with nothing watching it.
+      const request = navigator.mediaDevices
+        .getUserMedia({ video: { facingMode: "environment" } })
+        .then((stream) => {
+          if (timedOut) {
+            stream.getTracks().forEach((t) => t.stop());
+          }
+          return stream;
+        });
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        const stream = await Promise.race([
+          request,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => {
+              timedOut = true;
+              reject(new Error("camera-start-timeout"));
+            }, CAMERA_START_TIMEOUT_MS),
+          ),
+        ]);
         if (stopped) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -45,10 +82,9 @@ export function ScannerOverlay({ purpose, onClose, onDetect }: Props) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
-        tick();
+        intervalRef.current = window.setInterval(tick, SCAN_INTERVAL_MS);
       } catch {
-        setCameraError("Camera access was denied.");
-        setShowManual(true);
+        fail("Camera access was denied.");
       }
     }
 
@@ -64,18 +100,17 @@ export function ScannerOverlay({ purpose, onClose, onDetect }: Props) {
           const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const code = jsQR(image.data, image.width, image.height);
           if (code && code.data) {
+            if (intervalRef.current) window.clearInterval(intervalRef.current);
             onDetect(code.data);
-            return;
           }
         }
       }
-      rafRef.current = requestAnimationFrame(tick);
     }
 
     start();
     return () => {
       stopped = true;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
