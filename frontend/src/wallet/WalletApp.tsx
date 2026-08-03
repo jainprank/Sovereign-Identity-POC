@@ -149,6 +149,13 @@ export function WalletApp() {
 
   const closeOverlay = () => setOverlay(null);
 
+  /** The Scan tab is reachable from any tab (Activity, Identity), but backing out of it should
+   * always land on the credential list, not wherever the user happened to be before scanning. */
+  const closeScanner = () => {
+    setOverlay(null);
+    setTab("wallet");
+  };
+
   const handleScanDetect = async (text: string, purpose: "claim" | "present") => {
     if (purpose === "claim") {
       const code = extractPreAuthorizedCode(text);
@@ -254,7 +261,7 @@ export function WalletApp() {
       {overlay?.t === "scan" && (
         <ScannerOverlay
           purpose={overlay.purpose}
-          onClose={closeOverlay}
+          onClose={closeScanner}
           onDetect={(text) => handleScanDetect(text, overlay.purpose)}
         />
       )}
