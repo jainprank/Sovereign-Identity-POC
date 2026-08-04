@@ -24,6 +24,13 @@ export const oidcSettings = {
   redirect_uri: isNative ? NATIVE_REDIRECT_URI : `${window.location.origin}/callback`,
   post_logout_redirect_uri: isNative ? NATIVE_REDIRECT_URI : window.location.origin,
   scope: "openid profile email",
+  // Without this, oidc-client-ts fetches the access token once at sign-in and never again -
+  // every API call made after Keycloak's accessTokenLifespan (5 min by default) then fails with
+  // a 401 that calling pages misreport as a permissions error ("requires PLATFORM_ADMIN") since
+  // they don't distinguish an expired session from an actually-unauthorized one. The Authorization
+  // Code + PKCE flow above already gets a refresh_token from Keycloak, so this renews in the
+  // background via a plain token-endpoint request - no iframe/silent-redirect page needed.
+  automaticSilentRenew: true,
 };
 
 export const userManager = new UserManager(oidcSettings);
