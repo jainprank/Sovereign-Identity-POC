@@ -27,6 +27,8 @@ export function VerificationsPage() {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [requestUri, setRequestUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [justCreated, setJustCreated] = useState(false);
 
   function load() {
     if (!tenantId) return;
@@ -38,13 +40,17 @@ export function VerificationsPage() {
 
   async function createRequest() {
     setError(null);
+    setCreating(true);
     try {
       const response = await client.post("/api/v1/verification-requests", { policyId });
       setQrCode(response.data.qrCodePngBase64);
       setRequestUri(response.data.oid4vpRequestUri);
       load();
+      setJustCreated(true);
     } catch {
       setError("Could not create verification request - check you have a published policy.");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -65,8 +71,18 @@ export function VerificationsPage() {
             </option>
           ))}
         </select>
-        <button className="btn-primary" onClick={createRequest} disabled={!policyId}>
-          Create OID4VP request
+        <button className="btn-primary" onClick={createRequest} disabled={!policyId || creating}>
+          {creating ? (
+            <span className="inline-flex items-center gap-2">
+              <span
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"
+                aria-hidden="true"
+              />
+              Creating…
+            </span>
+          ) : (
+            "Create OID4VP request"
+          )}
         </button>
       </div>
       {qrCode && (
@@ -104,6 +120,26 @@ export function VerificationsPage() {
           ))}
         </tbody>
       </table>
+
+      {justCreated && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setJustCreated(false)}>
+          <div className="bg-white rounded shadow-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-600 text-lg">✓</span>
+              <h3 className="text-lg font-semibold">Verification request created</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              The request is ready — scan the QR code or paste the link into the wallet app. It stays visible below
+              after you close this.
+            </p>
+            <div className="flex justify-end">
+              <button className="btn-primary" onClick={() => setJustCreated(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

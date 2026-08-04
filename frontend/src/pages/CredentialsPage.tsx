@@ -26,6 +26,10 @@ interface OfferResponse {
   expiresAt: string;
 }
 
+interface IssueResponse {
+  credential: CredentialResponse;
+}
+
 export function CredentialsPage() {
   const auth = useAuth();
   const { tenantId } = useTenant();
@@ -38,6 +42,8 @@ export function CredentialsPage() {
   const [subjectDid, setSubjectDid] = useState("");
   const [claimsJson, setClaimsJson] = useState('{\n  "name": "Alice"\n}');
   const [error, setError] = useState<string | null>(null);
+  const [issuing, setIssuing] = useState(false);
+  const [issued, setIssued] = useState<CredentialResponse | null>(null);
 
   const [offerCredentialId, setOfferCredentialId] = useState<string | null>(null);
   const [offer, setOffer] = useState<OfferResponse | null>(null);
@@ -67,11 +73,20 @@ export function CredentialsPage() {
       setError("Claims must be valid JSON.");
       return;
     }
+    setIssuing(true);
     try {
-      await client.post("/api/v1/credentials", { schemaId, issuerDid, subjectDid: subjectDid.trim() || null, claims });
+      const response = await client.post<IssueResponse>("/api/v1/credentials", {
+        schemaId,
+        issuerDid,
+        subjectDid: subjectDid.trim() || null,
+        claims,
+      });
       load();
+      setIssued(response.data.credential);
     } catch {
       setError("Could not issue credential - check the schema is PUBLISHED and the issuer DID is valid.");
+    } finally {
+      setIssuing(false);
     }
   }
 
@@ -125,8 +140,18 @@ export function CredentialsPage() {
           value={claimsJson}
           onChange={(e) => setClaimsJson(e.target.value)}
         />
-        <button className="btn-primary col-span-2" onClick={issue} disabled={!schemaId || !issuerDid}>
-          Issue credential
+        <button className="btn-primary col-span-2" onClick={issue} disabled={!schemaId || !issuerDid || issuing}>
+          {issuing ? (
+            <span className="inline-flex items-center gap-2">
+              <span
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"
+                aria-hidden="true"
+              />
+              Issuing credential…
+            </span>
+          ) : (
+            "Issue credential"
+          )}
         </button>
       </div>
       <table className="w-full bg-white shadow rounded">
@@ -185,6 +210,29 @@ export function CredentialsPage() {
               <p className="text-xs text-gray-500">Expires {new Date(offer.expiresAt).toLocaleTimeString()}</p>
             </>
           )}
+        </div>
+      )}
+
+      {issued && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setIssued(null)}>
+          <div className="bg-white rounded shadow-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-600 text-lg">✓</span>
+              <h3 className="text-lg font-semibold">Credential issued</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">
+              The credential has been signed, anchored to Hedera, and now appears in the table below.
+            </p>
+            <div className="bg-gray-50 rounded p-2 mb-4 font-mono text-xs break-all">
+              {issued.subjectDid || "(no subject — claimable by whoever redeems the offer)"}
+            </div>
+            <div className="flex items-center justify-between">
+              <HederaAnchorLink api={client} resourceType="CREDENTIAL" resourceId={issued.id} />
+              <button className="btn-primary" onClick={() => setIssued(null)}>
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
