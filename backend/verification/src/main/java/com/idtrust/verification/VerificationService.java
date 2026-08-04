@@ -216,7 +216,12 @@ public class VerificationService {
 
         String issuerDid = vc.issuerDid();
         String subjectDid = vc.subjectDid();
-        boolean subjectBindingValid = holderDid != null && holderDid.equals(subjectDid);
+        // A credential issued with no subject (CredentialController allows this - see its
+        // Javadoc: "claimable by whoever redeems the offer") is a bearer credential by design;
+        // there is nothing to bind against, so the holder's own signature on the VP (checked via
+        // holderSignatureValid) is the only proof of control that applies. Only a credential that
+        // *was* issued to a specific subject enforces an exact holder match here.
+        boolean subjectBindingValid = subjectDid == null || (holderDid != null && holderDid.equals(subjectDid));
         checks.put("subjectBindingValid", subjectBindingValid);
 
         boolean credentialSignatureValid;
