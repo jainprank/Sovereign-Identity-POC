@@ -22,6 +22,8 @@ export function DidsPage() {
   const [method, setMethod] = useState(METHODS[0]);
   const [domain, setDomain] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<DidResponse | null>(null);
 
   const client = createApiClient(auth.user?.access_token, tenantId);
 
@@ -37,12 +39,16 @@ export function DidsPage() {
 
   async function create() {
     setError(null);
+    setCreating(true);
     try {
-      await client.post("/api/v1/dids", { method, domain: domain || null, path: null });
+      const response = await client.post<DidResponse>("/api/v1/dids", { method, domain: domain || null, path: null });
       setDomain("");
       load();
+      setCreated(response.data);
     } catch {
       setError("Could not create DID - check that your role has ISSUER/ORG_ADMIN/PLATFORM_ADMIN access.");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -70,8 +76,18 @@ export function DidsPage() {
             onChange={(e) => setDomain(e.target.value)}
           />
         )}
-        <button className="btn-primary" onClick={create}>
-          Create DID
+        <button className="btn-primary" onClick={create} disabled={creating}>
+          {creating ? (
+            <span className="inline-flex items-center gap-2">
+              <span
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"
+                aria-hidden="true"
+              />
+              Creating DID…
+            </span>
+          ) : (
+            "Create DID"
+          )}
         </button>
       </div>
       <table className="w-full bg-white shadow rounded">
@@ -98,6 +114,27 @@ export function DidsPage() {
           ))}
         </tbody>
       </table>
+
+      {created && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setCreated(null)}>
+          <div className="bg-white rounded shadow-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-600 text-lg">✓</span>
+              <h3 className="text-lg font-semibold">DID created</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">
+              The DID has been created and anchored to Hedera. It now appears in the table below.
+            </p>
+            <div className="bg-gray-50 rounded p-2 mb-4 font-mono text-xs break-all">{created.did}</div>
+            <div className="flex items-center justify-between">
+              <HederaAnchorLink api={client} resourceType="DID" resourceId={created.id} />
+              <button className="btn-primary" onClick={() => setCreated(null)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
