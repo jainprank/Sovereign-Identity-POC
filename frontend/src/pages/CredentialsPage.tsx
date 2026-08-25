@@ -1,15 +1,50 @@
 import { useEffect, useState } from "react";
+import { isAxiosError } from "axios";
 import { useAuth } from "react-oidc-context";
 import { createApiClient } from "../lib/api";
 import { useTenant } from "../tenant/TenantContext";
 import type { PageResponse } from "../lib/pageResponse";
 import { HederaAnchorLink } from "../components/HederaAnchorLink";
 
+interface SchemaClaim {
+  name: string;
+  type: string;
+  required: boolean;
+}
+
 interface SchemaResponse {
   id: string;
   name: string;
   version: string;
   status: string;
+  claims: SchemaClaim[];
+}
+
+function placeholderForClaimType(type: string): unknown {
+  switch (type) {
+    case "NUMBER":
+      return 0;
+    case "BOOLEAN":
+      return false;
+    default:
+      return "";
+  }
+}
+
+function claimsTemplateFor(schema: SchemaResponse | undefined): string {
+  if (!schema) return "{}";
+  const template: Record<string, unknown> = {};
+  for (const claim of schema.claims) {
+    if (claim.required) template[claim.name] = placeholderForClaimType(claim.type);
+  }
+  return JSON.stringify(template, null, 2);
+}
+
+function extractErrorMessage(err: unknown, fallback: string): string {
+  if (isAxiosError(err) && typeof err.response?.data?.message === "string") {
+    return err.response.data.message;
+  }
+  return fallback;
 }
 
 interface CredentialResponse {
@@ -40,7 +75,7 @@ export function CredentialsPage() {
   const [schemaId, setSchemaId] = useState("");
   const [issuerDid, setIssuerDid] = useState("");
   const [subjectDid, setSubjectDid] = useState("");
-  const [claimsJson, setClaimsJson] = useState('{\n  "name": "Alice"\n}');
+  const [claimsJson, setClaimsJson] = useState("{}");
   const [error, setError] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [issued, setIssued] = useState<CredentialResponse | null>(null);
@@ -64,6 +99,11 @@ export function CredentialsPage() {
 
   useEffect(load, [tenantId]);
 
+  function handleSchemaChange(nextSchemaId: string) {
+    setSchemaId(nextSchemaId);
+    setClaimsJson(claimsTemplateFor(schemas.find((s) => s.id === nextSchemaId)));
+  }
+
   async function issue() {
     setError(null);
     let claims: Record<string, unknown>;
@@ -83,8 +123,8 @@ export function CredentialsPage() {
       });
       load();
       setIssued(response.data.credential);
-    } catch {
-      setError("Could not issue credential - check the schema is PUBLISHED and the issuer DID is valid.");
+    } catch (err) {
+      setError(extractErrorMessage(err, "Could not issue credential - check the schema is PUBLISHED and the issuer DID is valid."));
     } finally {
       setIssuing(false);
     }
@@ -98,8 +138,8 @@ export function CredentialsPage() {
     try {
       const response = await client.post<OfferResponse>("/api/v1/oid4vci/offers", { credentialId });
       setOffer(response.data);
-    } catch {
-      setOfferError("Could not generate an offer for this credential.");
+    } catch (err) {
+      setOfferError(extractErrorMessage(err, "Could not generate an offer for this credential."));
     } finally {
       setOfferLoading(false);
     }
@@ -114,7 +154,7 @@ export function CredentialsPage() {
       <h2 className="text-lg font-semibold mb-4">Credentials</h2>
       {error && <p className="text-red-600 mb-2">{error}</p>}
       <div className="bg-white shadow rounded p-4 mb-6 grid grid-cols-2 gap-3 max-w-2xl">
-        <select className="border rounded px-2 py-1 col-span-2" value={schemaId} onChange={(e) => setSchemaId(e.target.value)}>
+        <select className="border rounded px-2 py-1 col-span-2" value={schemaId} onChange={(e) => handleSchemaChange(e.target.value)}>
           <option value="">Select schema…</option>
           {schemas.map((s) => (
             <option key={s.id} value={s.id}>
