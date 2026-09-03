@@ -1,0 +1,48 @@
+{
+  "realm": "idtrust",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "roles": {
+    "realm": [
+      { "name": "PLATFORM_ADMIN", "description": "Cross-tenant platform administrator" },
+      { "name": "ORG_ADMIN", "description": "Tenant/organization administrator" },
+      { "name": "ISSUER", "description": "Can issue credentials" },
+      { "name": "VERIFIER", "description": "Can create and manage verification requests" },
+      { "name": "AUDITOR", "description": "Read-only access to audit logs" },
+      { "name": "HOLDER", "description": "Wallet holder (mobile app)" },
+      { "name": "DEVELOPER", "description": "API client / developer access" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "idtrust-app",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost",
+        "http://localhost/*",
+        "http://localhost:5173",
+        "com.idtrust.wallet://callback",
+        "https://idtrust-admin-console.onrender.com/*",
+        "https://idtrust-admin-console.onrender.com"
+      ],
+      "webOrigins": [
+        "http://localhost",
+        "http://localhost:5173",
+        "https://idtrust-admin-console.onrender.com"
+      ]
+    }
+  ]
+}

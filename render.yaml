@@ -1,0 +1,136 @@
+# Render Blueprint — deploys the full IDTrust stack (Postgres + Keycloak + Spring Boot
+# backend + admin console) straight from this repo. Push to `main` and Render redeploys
+# automatically; no local Docker/colima/Postgres/Redis/Keycloak needed to run the admin console.
+#
+# One-time setup after creating the Blueprint in the Render dashboard:
+#   1. Render will prompt for every `sync: false` env var below (secrets) - fill in real values.
+#      For KMS_MASTER_KEY_BASE64, HEDERA_*, generate/copy from your local .env.
+#   2. First deploy: Keycloak auto-imports infra/keycloak/idtrust-realm.json (realm, roles,
+#      the idtrust-app client) but NOT users - partial-export never includes passwords. Log into
+#      https://idtrust-keycloak.onrender.com/admin (user/password you set below) and create at
+#      least one user with PLATFORM_ADMIN assigned, same as the local admin/admin123 setup.
+#   3. Fixed service names below (idtrust-backend, idtrust-keycloak, idtrust-admin-console)
+#      make the *.onrender.com URLs predictable and are wired into each other's env vars/CORS/
+#      redirect URIs already - don't rename services without updating those.
+#
+# Cost note: Render's free tier web services sleep when idle and free Postgres/Redis expire
+# after ~30-90 days - neither is suitable for Keycloak (loses sessions on every sleep, exactly
+# the reliability problem this migration is meant to fix) or for a database you want to keep.
+# Every service below is on a paid "starter" plan for that reason; check current Render pricing
+# before deploying.
+
+databases:
+  - name: idtrust-db
+    plan: starter
+    postgresMajorVersion: "16"
+    # Shared by both the backend (Flyway-migrated app tables) and Keycloak (its own KC_ tables) -
+    # table names don't collide, and this halves Postgres cost vs. two separate instances. Split
+    # into a second `databases:` entry later if you outgrow sharing one instance.
+
+services:
+  - type: redis
+    name: idtrust-redis
+    plan: starter
+    ipAllowList: []
+
+  - type: web
+    name: idtrust-keycloak
+    runtime: docker
+    plan: starter
+    dockerContext: infra/keycloak
+    dockerfilePath: infra/keycloak/Dockerfile
+    healthCheckPath: /health/ready
+    envVars:
+      - key: KC_DB
+        value: postgres
+      - key: KC_DB_URL
+        fromDatabase:
+          name: idtrust-db
+          property: connectionString
+      - key: KC_HOSTNAME
+        value: idtrust-keycloak.onrender.com
+      - key: KC_HTTP_ENABLED
+        value: "true"
+      - key: KC_PROXY_HEADERS
+        value: xforwarded
+      - key: KEYCLOAK_ADMIN
+        sync: false
+      - key: KEYCLOAK_ADMIN_PASSWORD
+        sync: false
+
+  - type: web
+    name: idtrust-backend
+    runtime: docker
+    plan: starter
+    dockerContext: backend
+    dockerfilePath: backend/Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SERVER_PORT
+        value: "8080"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: idtrust-db
+          property: connectionString
+      - key: DATABASE_USERNAME
+        fromDatabase:
+          name: idtrust-db
+          property: user
+      - key: DATABASE_PASSWORD
+        fromDatabase:
+          name: idtrust-db
+          property: password
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: idtrust-redis
+          property: connectionString
+      - key: KEYCLOAK_URL
+        value: https://idtrust-keycloak.onrender.com
+      - key: KEYCLOAK_REALM
+        value: idtrust
+      - key: KEYCLOAK_CLIENT_ID
+        value: idtrust-app
+      - key: KEYCLOAK_CLIENT_SECRET
+        value: ""
+      - key: JWT_ACCEPTED_ISSUERS
+        value: https://idtrust-keycloak.onrender.com/realms/idtrust
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://idtrust-admin-console.onrender.com
+      - key: KMS_PROVIDER
+        value: internal
+      - key: KMS_MASTER_KEY_BASE64
+        sync: false
+      - key: HEDERA_ENABLED
+        value: "true"
+      - key: HEDERA_NETWORK
+        value: testnet
+      - key: HEDERA_ACCOUNT_ID
+        sync: false
+      - key: HEDERA_OPERATOR_KEY
+        sync: false
+      - key: HEDERA_TOPIC_ID
+        sync: false
+      - key: API_RATE_LIMIT_REQUESTS_PER_MINUTE
+        value: "2000"
+      - key: NOTIFICATION_EMAIL_ENABLED
+        value: "false"
+
+  - type: web
+    name: idtrust-admin-console
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://idtrust-backend.onrender.com
+      - key: VITE_KEYCLOAK_URL
+        value: https://idtrust-keycloak.onrender.com
+      - key: VITE_KEYCLOAK_REALM
+        value: idtrust
+      - key: VITE_KEYCLOAK_CLIENT_ID
+        value: idtrust-app
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
